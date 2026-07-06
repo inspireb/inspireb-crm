@@ -139,7 +139,7 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
     <button data-view="catalogue">☰ Catalogue</button>
     <button data-view="imports">⇅ Imports</button>
     <button data-view="params">⚙ Réglages</button>
-    <div class="foot">La beauté qui vient de l’intérieur<br><button data-act="logout" style="margin-top:10px;padding-left:0;color:var(--muted);font-size:12px;background:none;border:none;cursor:pointer">⎋ Se déconnecter</button></div>
+    <div class="foot">La beauté qui vient de l’intérieur<br><button data-act="logout" style="margin-top:10px;padding-left:0;color:var(--muted);font-size:12px;background:none;border:none;cursor:pointer">⎋ Verrouiller</button></div>
   </aside>
   <div style="flex:1">
     <div id="mobileBar"><div class="row"><span class="logo"><img class="logoimg" alt=""><span class="script">InspireB</span></span>
@@ -152,21 +152,7 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
     <main><div id="view"></div></main>
   </div>
 </div>
-<div id="lock">
-  <form class="box" data-form="login">
-    <div class="brand"><img class="logoimg" alt="">InspireB</div>
-    <div class="tag">Espace de suivi client — accès protégé</div>
-    <div style="margin-bottom:10px"><label>Compte GitHub (owner)</label><input name="owner" id="lockOwner" autocomplete="username" required></div>
-    <div style="margin-bottom:10px"><label>Dépôt privé des données</label><input name="repo" id="lockRepo" placeholder="inspireb-donnees" required></div>
-    <div style="margin-bottom:10px"><label>Jeton d’accès (fine-grained)</label><input type="password" name="token" id="lockToken" autocomplete="current-password" required></div>
-    <details style="margin-bottom:12px"><summary class="hint" style="cursor:pointer">Avancé</summary>
-      <div style="margin-top:8px"><label>Fichier de données</label><input name="path" id="lockPath" value="crm.json"></div></details>
-    <label class="check" style="margin-bottom:14px"><input type="checkbox" name="remember"> Mémoriser le jeton sur cet appareil</label>
-    <button class="btn" style="width:100%">Se connecter</button>
-    <div class="msg" id="lockMsg"></div>
-    <button type="button" class="off" data-act="offline">Continuer hors ligne (données de ce navigateur uniquement)</button>
-  </form>
-</div>
+<div id="lock"><div class="box" id="lockBox"></div></div>
 <button id="syncBtn" data-act="ghPush" style="display:none"></button>
 <div id="toast"></div>
 <div id="printArea"></div>
@@ -245,9 +231,43 @@ const sess={get(k){try{return sessionStorage.getItem(k);}catch(e){return null;}}
 const ghOK=()=>{const g=db.settings.gh;return g.owner&&g.repo&&ghToken;};
 const ghURL=()=>{const g=db.settings.gh;return`https://api.github.com/repos/${g.owner}/${g.repo}/contents/${g.path||'crm.json'}`;};
 const ghH=()=>({'Authorization':'Bearer '+ghToken,'Accept':'application/vnd.github+json'});
+async function deriveKey(pw,salt){const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);}
+async function vaultCreate(pw,token){const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await deriveKey(pw,salt);const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(token)));
+  store.set('inspireb_vault',JSON.stringify({s:[...salt],i:[...iv],c:[...ct]}));}
+async function vaultOpen(pw){const raw=store.get('inspireb_vault');if(!raw)throw new Error('no vault');const o=JSON.parse(raw);
+  const key=await deriveKey(pw,new Uint8Array(o.s));
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(o.i)},key,new Uint8Array(o.c));
+  return new TextDecoder().decode(pt);}
 function lockMsg(m,ok){const e=$('#lockMsg');if(e){e.textContent=m||'';e.className=ok?'msg ok':'msg';}}
-function showLock(msg){$('#app').style.display='none';$('#lock').style.display='flex';
-  const g=db.settings.gh;$('#lockOwner').value=g.owner||'';$('#lockRepo').value=g.repo||'';$('#lockPath').value=g.path||'crm.json';$('#lockToken').value='';lockMsg(msg||'');}
+function lockHead(){return`<div class="brand"><img src="${LOGO}" alt="">InspireB</div><div class="tag">Espace de suivi client — accès protégé</div>`;}
+function showLock(msg,mode){$('#app').style.display='none';$('#lock').style.display='flex';
+  const g=db.settings.gh;const legacy=store.get('inspireb_token')||'';
+  if(!mode)mode=store.get('inspireb_vault')?'pw':'setup';
+  if(mode==='pw'){
+    $('#lockBox').innerHTML=`<form data-form="unlock">${lockHead()}
+      <div style="margin-bottom:14px"><label>Mot de passe</label><input type="password" name="pw" autocomplete="current-password" autofocus required></div>
+      <button class="btn" style="width:100%">Déverrouiller</button>
+      <div class="msg" id="lockMsg"></div>
+      <button type="button" class="off" data-act="goSetup">Utiliser un autre compte, un autre jeton, ou mot de passe oublié</button>
+      <button type="button" class="off" data-act="offline">Continuer hors ligne (données de ce navigateur uniquement)</button></form>`;
+  }else{
+    $('#lockBox').innerHTML=`<form data-form="setup">${lockHead()}
+      <p class="hint" style="margin-bottom:12px">Première installation sur cet appareil : le jeton sera chiffré (AES-256) avec votre mot de passe, puis ne sera plus jamais demandé ici.</p>
+      <div style="margin-bottom:10px"><label>Compte GitHub (owner)</label><input name="owner" value="${esc(g.owner)}" autocomplete="username" required></div>
+      <div style="margin-bottom:10px"><label>Dépôt privé des données</label><input name="repo" value="${esc(g.repo)}" placeholder="inspireb-donnees" required></div>
+      <div style="margin-bottom:10px"><label>Jeton d’accès (fine-grained)</label><input type="password" name="token" value="${esc(legacy)}" required></div>
+      <div style="margin-bottom:10px"><label>Choisissez un mot de passe</label><input type="password" name="pw1" autocomplete="new-password" minlength="8" required></div>
+      <div style="margin-bottom:12px"><label>Confirmez le mot de passe</label><input type="password" name="pw2" autocomplete="new-password" minlength="8" required></div>
+      <details style="margin-bottom:12px"><summary class="hint" style="cursor:pointer">Avancé</summary>
+        <div style="margin-top:8px"><label>Fichier de données</label><input name="path" value="${esc(g.path||'crm.json')}"></div></details>
+      <button class="btn" style="width:100%">Chiffrer le jeton et se connecter</button>
+      <div class="msg" id="lockMsg"></div>
+      ${store.get('inspireb_vault')?'<button type="button" class="off" data-act="goPw">← Revenir au déverrouillage par mot de passe</button>':''}
+      <button type="button" class="off" data-act="offline">Continuer hors ligne (données de ce navigateur uniquement)</button></form>`;
+  }
+  lockMsg(msg||'');}
 function unlock(){$('#lock').style.display='none';$('#app').style.display='flex';render();updateSyncBtn();}
 const b64enc=s=>{const u=new TextEncoder().encode(s);let bin='';for(let i=0;i<u.length;i+=0x8000)bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(bin);};
 const b64dec=s=>new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g,'')),c=>c.charCodeAt(0)));
@@ -716,7 +736,8 @@ function viewParams(){
   ${ghOK()?`<p class="hint" style="margin-bottom:10px">Connectée au dépôt privé <strong>${esc(g.owner)}/${esc(g.repo)}</strong> · fichier <strong>${esc(g.path||'crm.json')}</strong>. Le jeton reste sur cet appareil : il n’est jamais écrit dans le fichier synchronisé.</p>
   <div class="row"><button type="button" class="btn soft" data-act="ghPull">⭳ Charger depuis GitHub</button>
     <button type="button" class="btn soft" data-act="ghPush">⭱ Envoyer vers GitHub</button>
-    <button type="button" class="btn ghost" data-act="logout">⎋ Se déconnecter</button></div>
+    <button type="button" class="btn ghost" data-act="logout">⎋ Verrouiller</button>
+    <button type="button" class="btn danger" data-act="forgetDevice">Oublier cet appareil</button></div>
   <label class="check" style="margin-top:12px"><input type="checkbox" data-act="toggleAuto" ${store.get('inspireb_autosync')!=='off'?'checked':''}> Envoi automatique vers GitHub (45 s après chaque modification)</label>`
   :`<p class="hint" style="margin-bottom:10px">Mode hors ligne : les données ne vivent que dans ce navigateur. Connectez-vous pour synchroniser avec votre dépôt GitHub privé.</p>
   <div class="row"><button type="button" class="btn" data-act="goLogin">Se connecter</button></div>`}</div>
@@ -807,9 +828,13 @@ document.addEventListener('click',async(e)=>{
     async ghPull(){toast('Chargement depuis GitHub…');const r=await ghLoad();toast(r.ok?(r.empty?'Aucune donnée sur GitHub pour l’instant':'Données chargées depuis GitHub'):r.msg,!r.ok);if(r.ok)render();},
     async ghPush(){toast('Envoi vers GitHub…');const r=await ghSave();toast(r.ok?'Données envoyées vers GitHub':r.msg,!r.ok);render();},
     exportJson(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(db,null,2)],{type:'application/json'}));a.download=`inspireb-crm-${today()}.json`;a.click();},
-    logout(){if(!confirm('Se déconnecter ? Le jeton sera retiré de cet appareil. Vos données restent en sécurité sur GitHub.'))return;
-      ghToken='';store.del('inspireb_token');sess.del('inspireb_token');ghSha=null;showLock('');},
+    logout(){if(!confirm('Verrouiller la session ? Le mot de passe sera demandé à la prochaine ouverture.'))return;
+      ghToken='';ghSha=null;showLock('');},
     goLogin(){showLock('');},
+    goSetup(){showLock('','setup');},
+    goPw(){showLock('','pw');},
+    forgetDevice(){if(!confirm('Oublier cet appareil ? Le jeton chiffré sera supprimé de ce navigateur. Vous devrez ressaisir le jeton GitHub et choisir un nouveau mot de passe. Vos données sur GitHub ne sont pas touchées.'))return;
+      ghToken='';ghSha=null;store.del('inspireb_vault');store.del('inspireb_token');sess.del('inspireb_token');showLock('','setup');},
     offline(){unlock();toast('Mode hors ligne — pensez à exporter une sauvegarde régulièrement');},
     resetAll(){if(confirm('Effacer TOUTES les données de ce navigateur ? Exportez une sauvegarde avant.')){db=structuredClone(DB_DEFAULT);db.soins=structuredClone(SEED_SOINS);store.del('inspireb_db');state.clientId=null;render();toast('Données réinitialisées');}},
   };
@@ -854,17 +879,27 @@ document.addEventListener('submit',(e)=>{
     updProduit(){const x=db.produits.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,marque:d.marque||'',prix:+d.prix||0});state.editProduit=null;saveLocal();render();toast('Produit modifié');},
     addProduit(){db.produits.push({id:uid('p'),designation:d.designation,marque:d.marque||'',prix:+d.prix||0});saveLocal();render();},
     saveEnt(){Object.assign(db.settings.ent,d);saveLocal();render();toast('Informations enregistrées');},
-    async login(){
+    async unlock(){
+      lockMsg('Déverrouillage…',true);
+      try{ghToken=await vaultOpen(d.pw||'');}catch(e){ghToken='';return lockMsg('Mot de passe incorrect.');}
+      ghSha=null;const r=await ghLoad();
+      if(!r.ok){ghToken='';return lockMsg(r.msg+' — le jeton a peut-être expiré : « Utiliser un autre jeton » ci-dessous.');}
+      saveLocal();setDirty(false);unlock();toast('Bonjour Betty ✦ données chargées');
+    },
+    async setup(){
+      if((d.pw1||'').length<8)return lockMsg('Mot de passe : 8 caractères minimum.');
+      if(d.pw1!==d.pw2)return lockMsg('Les deux mots de passe ne correspondent pas.');
       db.settings.gh.owner=(d.owner||'').trim();db.settings.gh.repo=(d.repo||'').trim();db.settings.gh.path=(d.path||'crm.json').trim();
       ghToken=(d.token||'').trim();ghSha=null;
       if(!ghOK())return lockMsg('Renseignez le compte, le dépôt et le jeton.');
-      lockMsg('Connexion en cours…',true);
+      lockMsg('Vérification du jeton…',true);
       const r=await ghLoad();
       if(!r.ok){ghToken='';return lockMsg(r.msg+' — vérifiez le nom du dépôt et le jeton.');}
-      if(d.remember)store.set('inspireb_token',ghToken);else{store.del('inspireb_token');sess.set('inspireb_token',ghToken);}
+      await vaultCreate(d.pw1,ghToken);
+      store.del('inspireb_token');sess.del('inspireb_token');
       saveLocal();setDirty(false);
-      if(r.empty){const s=await ghSave();unlock();toast(s.ok?'Dépôt initialisé — fichier '+db.settings.gh.path+' créé':s.msg,!s.ok);}
-      else{unlock();toast('Bonjour Betty ✦ données chargées');}
+      if(r.empty){const sv=await ghSave();unlock();toast(sv.ok?'Jeton chiffré ✓ — dépôt initialisé':sv.msg,!sv.ok);}
+      else{unlock();toast('Jeton chiffré ✓ — données chargées');}
     },
   };
   if(F[f.dataset.form])F[f.dataset.form]();
@@ -897,13 +932,9 @@ document.addEventListener('input',(e)=>{
 (async function init(){
   document.querySelectorAll('.logoimg').forEach(i=>i.src=LOGO);document.getElementById('favicon').href=FAVICON;
   loadLocal();
-  ghToken=store.get('inspireb_token')||sess.get('inspireb_token')||'';
-  if(ghOK()){
-    lockMsg('');
-    const r=await ghLoad();
-    if(r.ok){unlock();if(r.empty)toast('Dépôt vide — vos données locales seront envoyées au premier « Envoyer vers GitHub »');}
-    else showLock(r.msg+' — reconnectez-vous.');
-  }else showLock('');
+  if(store.get('inspireb_vault'))showLock('','pw');
+  else if(store.get('inspireb_token'))showLock('Sécurisons votre jeton : choisissez un mot de passe, il chiffrera le jeton déjà enregistré (pré-rempli).','setup');
+  else showLock('','setup');
 })();
 </script>
 </body>

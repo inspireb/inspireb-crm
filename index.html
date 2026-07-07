@@ -7,7 +7,7 @@
 <link rel="icon" id="favicon" href="">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&family=Playfair+Display:ital,wght@0,500;0,700;1,500&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/clear-sans@5.2.5/400.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/clear-sans@5.2.5/500.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/clear-sans@5.2.5/700.css" rel="stylesheet">
@@ -123,6 +123,18 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
   #printArea th{text-align:left;border-bottom:1.5px solid #43584b;padding:6px}
   #printArea td{border-bottom:1px solid #ddd;padding:6px}
   #printArea .pf{margin-top:30px;padding-top:12px;border-top:1px solid #ccc;font-size:10.5px;color:#777;text-align:center}
+  #printArea .ccadeau{background:#f6f6e9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border:1px solid #dcdec8;border-radius:18px;padding:42px 48px;max-width:680px;margin:20px auto;font-family:'Clear Sans',sans-serif}
+  #printArea .cc-top{display:flex;justify-content:space-between;align-items:flex-start}
+  #printArea .cc-title{font-family:'Playfair Display',serif;font-weight:700;font-size:56px;line-height:.95;color:#111;letter-spacing:.02em}
+  #printArea .cc-title em{font-style:italic;font-weight:500}
+  #printArea .cc-logo{width:108px;height:108px}
+  #printArea .cc-quote{font-family:'Dancing Script',cursive;font-size:20px;color:#1c1c1c;margin:16px 0 24px;max-width:520px}
+  #printArea .cc-field{background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border-radius:26px;padding:13px 22px;margin:13px 0;font-size:16.5px}
+  #printArea .cc-field span{font-weight:700}
+  #printArea .cc-note{font-style:italic;font-size:12.5px;color:#555;margin:4px 0 26px}
+  #printArea .cc-bottom{display:flex;justify-content:space-between;align-items:flex-end}
+  #printArea .cc-contact{font-size:15px;line-height:1.55}
+  #printArea .cc-num{font-size:11px;color:#777;text-align:right}
   #printArea p{white-space:pre-wrap;font-size:13.5px;line-height:1.6;margin:4px 0}
 }
 </style>
@@ -353,12 +365,16 @@ function viewClients(){
   <div class="card"><div class="row">
     <input id="searchClient" placeholder="Rechercher par nom, email ou téléphone…" value="${esc(state.search)}" style="flex:1;min-width:200px">
     <button class="btn" data-act="newClient">+ Nouvelle cliente</button></div></div>
-  <div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Contact</th><th>Suivi</th><th>Statuts</th></tr></thead><tbody>
-  ${list.map(c=>{const ns=db.seances.filter(s=>s.clientId===c.id).length;
+  <div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Prestations</th><th>Étiquettes</th></tr></thead><tbody>
+  ${list.map(c=>{const dates=db.seances.filter(s=>s.clientId===c.id).map(s=>s.date).sort();const ns=dates.length;
+    const tags=[c.nuskin?'<span class="badge">NuSkin</span>':'',c.jolimoi?'<span class="badge">Jolimoi</span>':'',
+      c.newsletter&&c.newsletter.abonnee?'<span class="badge ok">Newsletter ✓</span>':c.newsletter?'<span class="badge warn">Désabonnée</span>':'',
+      c.consentement?'':'<span class="badge warn">RGPD ?</span>'].filter(Boolean).join(' ');
     return`<tr><td><span class="clickable" data-act="openClient" data-id="${c.id}">${esc(C.name(c))}</span>${c.statut==='inactive'?' <span class="badge err">inactive</span>':''}</td>
-    <td>${esc(c.email||'—')}<br><span class="hint">${esc(c.tel||'')}</span></td>
-    <td>${ns} prestation${ns>1?'s':''}</td>
-    <td>${c.nuskin?'<span class="badge">NuSkin</span> ':''}${c.jolimoi?'<span class="badge">Jolimoi</span> ':''}${c.newsletter&&c.newsletter.abonnee?'<span class="badge ok">Newsletter ✓</span>':c.newsletter?'<span class="badge warn">Désabonnée</span>':''}</td></tr>`;}).join('')}
+    <td>${esc(c.email||'—')}</td>
+    <td style="white-space:nowrap">${esc(c.tel||'—')}</td>
+    <td>${ns?`${ns} · dern. ${fdate(dates[ns-1])}`:'—'}</td>
+    <td>${tags||'—'}</td></tr>`;}).join('')}
   </tbody></table>`:'<p class="hint">Aucune cliente ne correspond.</p>'}</div>`;
 }
 function ficheLabel(t){return{synthese:'Fiche de synthèse',conseils:'Fiche de conseils',suivi:'Fiche de suivi'}[t]||t;}
@@ -524,8 +540,11 @@ function viewCartes(){
   return`<h1>Cartes cadeaux</h1><p class="sub">Émission, utilisation et soldes</p>
   <form class="card" data-form="addCarte"><h2>Émettre une carte</h2>
   <div class="grid4">
+    <div><label>Support</label><select name="support" data-act="supportPick"><option value="elec">Électronique (modèle à imprimer/envoyer)</option><option value="phys">Physique (carte + étiquette code-barres)</option></select></div>
+    <div><label>Réf. étiquette (si physique)</label><input name="ref" placeholder="ex. INSPIREB 007"></div>
     <div><label>Date d’émission</label><input type="date" name="dateEmission" value="${today()}" required></div>
     <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
+    <div><label>Soin offert (facultatif)</label><input name="soin" placeholder="ex. Soin Duo Séréni’Baie — sinon le montant s’affiche"></div>
     <div><label>Acheteuse</label>${selClients('name="acheteuseId"')}</div>
     <div><label>ou acheteur·se libre</label><input name="acheteuseNom"></div>
     <div><label>Bénéficiaire</label><input name="beneficiaire"></div>
@@ -534,9 +553,9 @@ function viewCartes(){
   <div class="row" style="margin-top:12px"><button class="btn">Émettre</button></div></form>
   ${list.map(cc=>{const solde=carteSolde(cc);const epuisee=solde<=0;const perimee=cc.validite&&cc.validite<today();
   return`<div class="card"><div class="row" style="justify-content:space-between">
-    <h2>${esc(cc.num)} ${epuisee?'<span class="badge">Épuisée</span>':perimee?'<span class="badge err">Périmée</span>':'<span class="badge ok">Solde '+eur(solde)+'</span>'}</h2>
+    <h2>${esc(cc.num)} ${cc.support==='phys'?'<span class="badge gold" style="background:var(--gold-soft);color:#7a5a24">Physique'+(cc.ref?' · '+esc(cc.ref):'')+'</span>':'<span class="badge">Électronique</span>'} ${epuisee?'<span class="badge">Épuisée</span>':perimee?'<span class="badge err">Périmée</span>':'<span class="badge ok">Solde '+eur(solde)+'</span>'}</h2>
     <div class="row"><button class="btn sm soft" data-act="printCarte" data-id="${cc.id}">Imprimer / PDF</button><button class="btn sm danger" data-act="delCarte" data-id="${cc.id}">✕</button></div></div>
-  <p class="hint">Émise le ${fdate(cc.dateEmission)} · ${eur(cc.montant)} · payée en ${esc(cc.paiement||'—')} · acheteuse : ${esc(cc.acheteuseId?C.name(C.get(cc.acheteuseId)):cc.acheteuseNom||'—')} · bénéficiaire : ${esc(cc.beneficiaire||'—')} · valable jusqu’au ${fdate(cc.validite)}</p>
+  <p class="hint">Émise le ${fdate(cc.dateEmission)} · ${cc.soin?esc(cc.soin)+' ('+eur(cc.montant)+')':eur(cc.montant)} · payée en ${esc(cc.paiement||'—')} · acheteuse : ${esc(cc.acheteuseId?C.name(C.get(cc.acheteuseId)):cc.acheteuseNom||'—')} · bénéficiaire : ${esc(cc.beneficiaire||'—')} · valable jusqu’au ${fdate(cc.validite)}</p>
   ${(cc.utilisations||[]).length?`<table><tbody>${cc.utilisations.map(u=>`<tr><td>${fdate(u.date)}</td><td>${esc(u.note||'Utilisation')}</td><td style="text-align:right">− ${eur(u.montant)}</td></tr>`).join('')}</tbody></table>`:''}
   ${epuisee?'':`<form class="row" data-form="useCarte" data-id="${cc.id}" style="margin-top:8px">
     <input type="date" name="date" value="${today()}" style="max-width:160px">
@@ -679,7 +698,8 @@ function enrichirFiche(c,head,r,iE){let maj=0;
     else if(/code postal|\bcp\b/.test(nq))set('cp',val);
     else if(/\bville\b|commune/.test(nq))set('ville',val);
     else if(/adresse/.test(nq)&&!/mail/.test(nq))set('adresse',val);
-    else if(/naissance|anniversaire/.test(nq)){const dt=parseFRDate(val);if(dt)set('naissance',dt);}});
+    else if(/naissance|anniversaire/.test(nq)){const dt=parseFRDate(val);if(dt)set('naissance',dt);}
+    else if(/consent|accepte|rgpd/.test(nq)&&/oui|accepte|d'accord|yes|✓|x/i.test(norm(val))){if(!c.consentement){c.consentement=true;c.consentementDate=today();maj++;}}});
   return maj;}
 async function importForms(file){
   const rows=parseCSV(await file.text());if(rows.length<2)return toast('Fichier vide',true);
@@ -769,19 +789,26 @@ function printFacture(f){
   doPrint(`${printHead()}<h1>Facture ${esc(f.num)}</h1>
   <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">
     <div>Date : ${fdate(f.date)}<br>Statut : ${f.payee?'réglée ('+esc(f.paiement)+')':'en attente de règlement'}</div>
-    <div style="text-align:right"><strong>Facturée à</strong><br>${esc(C.name(c))}<br>${esc(c?.adresse||'')}${c?.adresse?'<br>':''}${esc(c?.cp||'')} ${esc(c?.ville||'')}</div></div>
+    <div style="text-align:right"><strong>Facturée à</strong><br>${esc(C.name(c))}${c?.adresse?'<br>'+esc(c.adresse):''}${((c?.cp||'')+(c?.ville||''))?'<br>'+esc(((c?.cp||'')+' '+(c?.ville||'')).trim()):''}</div></div>
   <table><thead><tr><th>Désignation</th><th style="text-align:right">Montant</th></tr></thead><tbody>
   ${f.lignes.map(l=>`<tr><td>${esc(l.designation)}</td><td style="text-align:right">${eur(l.montant)}</td></tr>`).join('')}
   <tr><td style="text-align:right;font-weight:600">Total</td><td style="text-align:right;font-weight:600">${eur(f.total)}</td></tr></tbody></table>
   <p style="font-size:11.5px;color:#555">${esc(e.mention)}</p>
   <div class="pf">${esc(e.nom)}${e.siret?' — SIRET '+esc(e.siret):''} — ${esc(e.cp)} ${esc(e.ville)}</div>`);
 }
-function printCarte(cc){
-  doPrint(`${printHead()}<h1 style="text-align:center;margin-top:30px">Carte cadeau ✦ ${eur(cc.montant)}</h1>
-  <p style="text-align:center;font-size:14px">Offerte à <strong>${esc(cc.beneficiaire||'…')}</strong></p>
-  <p style="text-align:center;font-size:12.5px;color:#555">N° ${esc(cc.num)} · émise le ${fdate(cc.dateEmission)} · valable jusqu’au ${fdate(cc.validite)}</p>
-  <p style="text-align:center;font-size:12.5px;margin-top:18px">À utiliser sur les soins et prestations InspireB, sur rendez-vous.</p>
-  <div class="pf">${esc(db.settings.ent.nom)} — ${esc(db.settings.ent.cp)} ${esc(db.settings.ent.ville)}</div>`);
+function printCarte(cc){const e=db.settings.ent;
+  const dela=cc.acheteuseId?C.name(C.get(cc.acheteuseId)):(cc.acheteuseNom||'');
+  doPrint(`<div class="ccadeau">
+  <div class="cc-top"><div class="cc-title">Carte<br><em>Cadeau</em></div><img src="${LOGO}" class="cc-logo" alt="InspireB"></div>
+  <div class="cc-quote">« Ici, nous prenons soin de nous avec douceur et conscience, tant à l’intérieur qu’à l’extérieur, à notre rythme. »</div>
+  <div class="cc-field"><span>De la part de :</span> ${esc(dela)}</div>
+  <div class="cc-field"><span>Soin ou montant :</span> ${esc(cc.soin||eur(cc.montant))}</div>
+  <div class="cc-field"><span>Pour :</span> ${esc(cc.beneficiaire||'')}</div>
+  <div class="cc-field"><span>Valable jusqu’au :</span> ${fdate(cc.validite)}</div>
+  <div class="cc-note">Non échangeable, non remboursable.</div>
+  <div class="cc-bottom"><div class="cc-contact">${esc(e.nom)}<br>Betty, praticienne beauté &amp; bien-être${e.tel?'<br>'+esc(e.tel):''}${e.email?'<br>'+esc(e.email):''}</div>
+  <div class="cc-num">N° ${esc(cc.num)}${cc.ref?'<br>Étiquette '+esc(cc.ref):''}</div></div>
+  </div>`);
 }
 
 /* ═════════ ÉVÉNEMENTS ═════════ */
@@ -868,7 +895,7 @@ document.addEventListener('submit',(e)=>{
     addPart(){const a=db.ateliers.find(x=>x.id===id);if(!a)return;
       if(!d.clientId&&!d.nom)return toast('Choisissez une cliente ou saisissez un nom',true);
       a.participants.push({clientId:d.clientId||'',nom:d.nom||'',montant:+d.montant||0,paiement:d.paiement});saveLocal();render();toast('Participation ajoutée');},
-    addCarte(){db.cartes.push({id:uid('cc'),num:nextNum('CC','carte'),dateEmission:d.dateEmission,montant:+d.montant||0,acheteuseId:d.acheteuseId||'',acheteuseNom:d.acheteuseNom||'',beneficiaire:d.beneficiaire||'',paiement:d.paiement,validite:d.validite,utilisations:[]});
+    addCarte(){db.cartes.push({id:uid('cc'),num:nextNum('CC','carte'),support:d.support||'elec',ref:(d.ref||'').trim(),soin:(d.soin||'').trim(),dateEmission:d.dateEmission,montant:+d.montant||0,acheteuseId:d.acheteuseId||'',acheteuseNom:d.acheteuseNom||'',beneficiaire:d.beneficiaire||'',paiement:d.paiement,validite:d.validite,utilisations:[]});
       saveLocal();render();toast('Carte cadeau émise');},
     useCarte(){const cc=db.cartes.find(x=>x.id===id);if(!cc)return;
       const m=+d.montant||0;if(m<=0)return;if(m>carteSolde(cc))return toast('Montant supérieur au solde restant',true);

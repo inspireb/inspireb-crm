@@ -104,9 +104,20 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
   #mobileBar .logo img{width:30px;height:30px}
   #mobileBar .logo .script{font-size:21px}
   #mobileBar select{background:#fff}
-  main{padding:18px 14px}
+  main{padding:16px 12px;overflow-x:hidden}
+  html,body{overflow-x:hidden;max-width:100vw}
   .grid2,.grid3,.grid4{grid-template-columns:1fr}
-  table{display:block;overflow-x:auto;white-space:nowrap}
+  .card{padding:14px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{display:block;overflow-x:auto;white-space:nowrap;font-size:12.5px;-webkit-overflow-scrolling:touch}
+  td,th{padding:7px 8px}
+  h1{font-size:22px}
+  .row{gap:8px}
+  .row>*,.row input,.row select{min-width:0!important}
+  [style*="min-width"]{min-width:0!important}
+  [style*="max-width"]{max-width:100%!important}
+  .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .tabs button{white-space:nowrap;flex:none}
+  .btn{padding:9px 13px}
 }
 /* ── écran de connexion ── */
 #lock{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:linear-gradient(160deg,var(--sage-deep) 0%,var(--sage-mid) 55%,var(--sage) 130%);z-index:50}
@@ -148,6 +159,7 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
     <button data-view="ateliers">✿ Ateliers</button>
     <button data-view="cartes">🎁 Cartes cadeaux</button>
     <button data-view="caisse">€ Encaissements</button>
+    <button data-view="finances">◆ Finances</button>
     <button data-view="catalogue">☰ Catalogue</button>
     <button data-view="imports">⇅ Imports</button>
     <button data-view="params">⚙ Réglages</button>
@@ -158,7 +170,7 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
       <select id="mobileNav">
         <option value="dash">Tableau de bord</option><option value="clients">Clientes</option>
         <option value="ateliers">Ateliers</option><option value="cartes">Cartes cadeaux</option>
-        <option value="caisse">Encaissements</option><option value="catalogue">Catalogue</option>
+        <option value="caisse">Encaissements</option><option value="finances">Finances</option><option value="catalogue">Catalogue</option>
         <option value="imports">Imports</option><option value="params">Réglages</option>
       </select></div></div>
     <main><div id="view"></div></main>
@@ -213,7 +225,8 @@ const DB_DEFAULT={v:3,clients:[],seances:[],ventes:[],fiches:[],factures:[],atel
 let db=structuredClone(DB_DEFAULT);
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch(e){return false;}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 function saveLocal(){db.settings.gh.token='';store.set('inspireb_db',JSON.stringify(db));setDirty(true);scheduleAuto();}
-function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);}
+function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:''};db.counters.carteE=db.counters.carteE||0;}
+function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
 let dirty=false;function setDirty(d){dirty=d;const b=$('#syncBadge');if(b)b.style.display=d&&ghOK()?'inline-block':'none';updateSyncBtn();}
 function updateSyncBtn(){const b=$('#syncBtn');if(!b)return;if(!ghOK()){b.style.display='none';return;}
   b.style.display='block';b.className=dirty?'dirty':'clean';b.textContent=dirty?'⭱ Synchroniser':'✓ Synchronisé';}
@@ -291,7 +304,7 @@ async function ghLoad(){if(!ghOK())return{ok:false,msg:'GitHub non configuré'};
     const j=await r.json();ghSha=j.sha;
     const remote=JSON.parse(b64dec(j.content));
     const gh=db.settings.gh;db=Object.assign(structuredClone(DB_DEFAULT),remote);db.settings.gh=gh;
-    if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);
+    if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();
     store.set('inspireb_db',JSON.stringify(db));setDirty(false);return{ok:true};
   }catch(e){return{ok:false,msg:'Connexion GitHub impossible'};}}
 async function ghSave(){if(!ghOK())return{ok:false,msg:'GitHub non configuré'};
@@ -305,11 +318,11 @@ async function ghSave(){if(!ghOK())return{ok:false,msg:'GitHub non configuré'};
   }catch(e){return{ok:false,msg:'Connexion GitHub impossible'};}}
 
 /* ═════════ ÉTAT & RENDU ═════════ */
-let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null};
+let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null,finMois:today().slice(0,7),rdv:null};
 function render(){
   document.querySelectorAll('#sidebar button[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view===state.view));
   const mn=$('#mobileNav');if(mn)mn.value=state.view;
-  const V={dash:viewDash,clients:()=>state.clientId?viewClientDetail():viewClients(),ateliers:viewAteliers,cartes:viewCartes,caisse:viewCaisse,catalogue:viewCatalogue,imports:viewImports,params:viewParams};
+  const V={dash:viewDash,clients:()=>state.clientId?(state.rdv&&state.rdv.clientId===state.clientId?viewRdv():viewClientDetail()):viewClients(),ateliers:viewAteliers,cartes:viewCartes,caisse:viewCaisse,finances:viewFinances,catalogue:viewCatalogue,imports:viewImports,params:viewParams};
   $('#view').innerHTML=(V[state.view]||viewDash)();
 }
 function selClients(sel,val){return`<select ${sel}><option value="">— Cliente —</option>${db.clients.slice().sort((a,b)=>C.name(a).localeCompare(C.name(b))).map(c=>`<option value="${c.id}" ${c.id===val?'selected':''}>${esc(C.name(c))}</option>`).join('')}</select>`;}
@@ -318,7 +331,7 @@ function selModes(name,val){return`<select name="${name}">${MODES.map(m=>`<optio
 /* ═════════ TABLEAU DE BORD ═════════ */
 function encaissements(){
   const out=[];
-  db.seances.forEach(s=>{if(!s.offert&&+s.montant>0)out.push({date:s.date,clientId:s.clientId,label:s.designation,type:'Prestation',montant:+s.montant,mode:s.paiement||'—'});});
+  db.seances.forEach(s=>{if(!s.offert&&!s.prevu&&+s.montant>0)out.push({date:s.date,clientId:s.clientId,label:s.designation,type:'Prestation',montant:+s.montant,mode:s.paiement||'—'});});
   db.ventes.forEach(v=>out.push({date:v.date,clientId:v.clientId,label:v.designation+(v.qte>1?' ×'+v.qte:''),type:'Produit',montant:+v.montant,mode:v.paiement||'—'}));
   db.cartes.forEach(cc=>{if(+cc.montant>0)out.push({date:cc.dateEmission,clientId:cc.acheteuseId,label:'Carte cadeau '+cc.num,type:'Carte cadeau',montant:+cc.montant,mode:cc.paiement||'—',free:cc.acheteuseNom});});
   db.ateliers.forEach(a=>(a.participants||[]).forEach(p=>{if(+p.montant>0)out.push({date:a.date,clientId:p.clientId,label:'Atelier — '+a.titre,type:'Atelier',montant:+p.montant,mode:p.paiement||'—',free:p.nom});}));
@@ -335,7 +348,7 @@ function mailAnniv(c){const su=encodeURIComponent('Joyeux anniversaire ✦ une a
 function viewDash(){
   const mois=today().slice(0,7);const enc=encaissements();
   const caMois=enc.filter(e=>(e.date||'').startsWith(mois)).reduce((s,e)=>s+e.montant,0);
-  const seancesMois=db.seances.filter(s=>(s.date||'').startsWith(mois)).length;
+  const seancesMois=db.seances.filter(s=>(s.date||'').startsWith(mois)&&!s.prevu).length;
   const soldes=db.cartes.reduce((s,cc)=>s+Math.max(0,+cc.montant-(cc.utilisations||[]).reduce((x,u)=>x+ +u.montant,0)),0);
   const last=enc.slice(0,8);
   return`<h1>Bonjour Betty <span style="color:var(--gold)">✦</span></h1><p class="sub">${new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</p>
@@ -345,6 +358,9 @@ function viewDash(){
     <div class="kpi"><div class="n">${seancesMois}</div><div class="l">Prestations ce mois-ci</div></div>
     <div class="kpi"><div class="n">${eur(soldes)}</div><div class="l">Cartes cadeaux en circulation</div></div>
   </div>
+  ${(()=>{const rdv=db.seances.filter(s=>s.prevu&&s.date>=today()).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,8);
+  return rdv.length?`<div class="card" style="margin-top:18px"><h2>📅 Prochains rendez-vous (import Setmore)</h2>
+  <table><tbody>${rdv.map(s=>`<tr><td>${fdate(s.date)}</td><td><span class="clickable" data-act="openClient" data-id="${s.clientId}">${esc(C.name(C.get(s.clientId)))}</span></td><td>${esc(s.designation)}</td><td style="text-align:right"><button class="btn sm soft" data-act="prepRdv" data-id="${s.clientId}">▶ Préparer</button></td></tr>`).join('')}</tbody></table></div>`:'';})()}
   ${(()=>{const an=prochainsAnniv(30);return an.length?`<div class="card" style="margin-top:18px"><h2>🎂 Anniversaires dans les 30 jours</h2>
   <table><tbody>${an.map(a=>`<tr><td><span class="clickable" data-act="openClient" data-id="${a.c.id}">${esc(C.name(a.c))}</span></td>
   <td>${a.next.toLocaleDateString('fr-FR',{day:'numeric',month:'long'})}</td>
@@ -388,7 +404,8 @@ function viewClientDetail(){
   const nl=c.newsletter;
   const head=`<div class="row" style="justify-content:space-between;margin-bottom:6px">
     <button class="btn ghost sm" data-act="backClients">← Clientes</button>
-    <div class="row"><button class="btn danger sm" data-act="rgpdExport" data-id="${c.id}">Exporter ses données</button>
+    <div class="row"><button class="btn sm" data-act="prepRdv" data-id="${c.id}">▶ Séance guidée</button>
+    <button class="btn danger sm" data-act="rgpdExport" data-id="${c.id}">Exporter ses données</button>
     <button class="btn danger sm" data-act="delClient" data-id="${c.id}">Supprimer (RGPD)</button></div></div>
   <h1>${esc(C.name(c))}</h1>
   <div class="row" style="margin:6px 0 4px">
@@ -437,7 +454,7 @@ function tabSeances(c){
   <input name="notes" placeholder="Note rapide (facultatif)" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div></form>
   <div class="card"><h2>Historique — ${list.length} prestation${list.length>1?'s':''}</h2>
   ${list.length?`<table><thead><tr><th>Date</th><th>Soin</th><th>Paiement</th><th style="text-align:right">Montant</th><th></th></tr></thead><tbody>
-  ${list.map(s=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}</td><td><button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune prestation enregistrée.</p>'}</div>`;
+  ${list.map(s=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.prevu?'<span class="badge warn">À venir</span>':s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}</td><td class="row">${s.prevu?`<button class="btn sm soft" data-act="doneSeance" data-id="${s.id}">✓ Réalisée</button>`:''}<button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune prestation enregistrée.</p>'}</div>`;
 }
 function tabVentes(c){
   const list=db.ventes.filter(v=>v.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -598,6 +615,112 @@ function viewCaisse(){
   <div class="row" style="margin-top:12px"><button class="btn ghost sm" data-act="exportCaisse">Exporter la période en CSV</button></div></div>`;
 }
 
+/* ═════════ FINANCES ═════════ */
+const FIN_CATS_REV=['Commissions NuSkin','Commissions Jolimoi','Affiliation Novoma','Autre revenu'];
+const FIN_CATS_CHG=['Achat produits / stock','Matériel','Abonnements & logiciels','Assurance','Déplacements','Formation','Cotisations URSSAF payées','Communication','Autre charge'];
+function finMois(mois){
+  const caCRM=encaissements().filter(e=>(e.date||'').startsWith(mois)).reduce((s,e)=>s+e.montant,0);
+  const revExt=db.fin.filter(f=>f.mois===mois&&f.type==='revenu').reduce((s,f)=>s+ +f.montant,0);
+  const charges=db.fin.filter(f=>f.mois===mois&&f.type==='charge').reduce((s,f)=>s+ +f.montant,0);
+  const rev=caCRM+revExt;const taux=parseFloat(db.settings.fin.taux)||0;
+  const cotis=taux?rev*taux/100:0;
+  return{caCRM,revExt,charges,rev,cotis,marge:rev-charges,net:rev-charges-cotis};
+}
+function viewFinances(){
+  const annee=state.finMois.slice(0,4);
+  const moisList=[];for(let m=1;m<=12;m++){const mm=annee+'-'+String(m).padStart(2,'0');if(mm<=today().slice(0,7)||db.fin.some(f=>f.mois===mm))moisList.push(mm);}
+  const tot={caCRM:0,revExt:0,charges:0,rev:0,cotis:0,marge:0,net:0};
+  const rows=moisList.map(mm=>{const r=finMois(mm);Object.keys(tot).forEach(k=>tot[k]+=r[k]);return{mm,...r};});
+  const taux=db.settings.fin.taux;
+  const entries=db.fin.filter(f=>f.mois===state.finMois).sort((a,b)=>a.type.localeCompare(b.type));
+  const cur=finMois(state.finMois);
+  return`<h1>Finances</h1><p class="sub">Pilotage : encaissements InspireB + revenus externes − charges. Estimation, ne remplace pas votre comptabilité officielle.</p>
+  <div class="grid4">
+    <div class="kpi"><div class="n">${eur(cur.rev)}</div><div class="l">Revenus ${state.finMois} (CRM ${eur(cur.caCRM)} + externe ${eur(cur.revExt)})</div></div>
+    <div class="kpi"><div class="n">${eur(cur.charges)}</div><div class="l">Charges ${state.finMois}</div></div>
+    <div class="kpi"><div class="n">${eur(cur.marge)}</div><div class="l">Marge avant cotisations</div></div>
+    <div class="kpi"><div class="n">${taux?eur(cur.net):'—'}</div><div class="l">${taux?'Reste estimé après cotisations ('+taux+'%)':'Renseignez votre taux de cotisations ci-dessous'}</div></div>
+  </div>
+  <form class="card" data-form="addFin" style="margin-top:18px"><h2>Ajouter un revenu externe ou une charge</h2>
+  <div class="grid4">
+    <div><label>Mois</label><input type="month" name="mois" value="${state.finMois}" required></div>
+    <div><label>Type</label><select name="type" id="finType"><option value="revenu">Revenu externe</option><option value="charge">Charge</option></select></div>
+    <div><label>Catégorie</label><select name="categorie">${[...FIN_CATS_REV,...FIN_CATS_CHG].map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
+  </div>
+  <div class="row" style="margin-top:10px"><input name="libelle" placeholder="Libellé (facultatif) : ex. commission juin, achat huiles…" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div>
+  <p class="hint" style="margin-top:8px">Vos encaissements InspireB (prestations, produits, cartes, ateliers) sont déjà comptés automatiquement — n'ajoutez ici que ce qui vient d'ailleurs : commissions NuSkin/Jolimoi, affiliations… et vos charges.</p></form>
+  <div class="card"><div class="row" style="justify-content:space-between"><h2>Écritures de ${state.finMois}</h2><input type="month" id="finMoisSel" value="${state.finMois}" style="max-width:170px"></div>
+  ${entries.length?`<table><tbody>${entries.map(f=>`<tr><td>${f.type==='revenu'?'<span class="badge ok">Revenu</span>':'<span class="badge warn">Charge</span>'}</td><td>${esc(f.categorie)}${f.libelle?`<br><span class="hint">${esc(f.libelle)}</span>`:''}</td><td style="text-align:right">${eur(f.montant)}</td><td><button class="btn sm danger" data-act="delFin" data-id="${f.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune écriture ce mois-ci.</p>'}</div>
+  <div class="card"><h2>Année ${annee}</h2>
+  <table><thead><tr><th>Mois</th><th style="text-align:right">CA InspireB</th><th style="text-align:right">Rev. externes</th><th style="text-align:right">Charges</th><th style="text-align:right">Marge</th>${taux?'<th style="text-align:right">Cotis. est.</th><th style="text-align:right">Net estimé</th>':''}</tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${r.mm}</td><td style="text-align:right">${eur(r.caCRM)}</td><td style="text-align:right">${eur(r.revExt)}</td><td style="text-align:right">${eur(r.charges)}</td><td style="text-align:right;font-weight:600">${eur(r.marge)}</td>${taux?`<td style="text-align:right">${eur(r.cotis)}</td><td style="text-align:right;font-weight:600">${eur(r.net)}</td>`:''}</tr>`).join('')}
+  <tr style="background:var(--sage-soft)"><td style="font-weight:700">Total</td><td style="text-align:right;font-weight:700">${eur(tot.caCRM)}</td><td style="text-align:right;font-weight:700">${eur(tot.revExt)}</td><td style="text-align:right;font-weight:700">${eur(tot.charges)}</td><td style="text-align:right;font-weight:700">${eur(tot.marge)}</td>${taux?`<td style="text-align:right;font-weight:700">${eur(tot.cotis)}</td><td style="text-align:right;font-weight:700">${eur(tot.net)}</td>`:''}</tr></tbody></table></div>
+  <form class="card" data-form="saveFinTaux"><h2>Estimation des cotisations</h2>
+  <div class="row"><div style="max-width:220px"><label>Taux de cotisations estimé (%)</label><input type="number" step="0.1" name="taux" value="${esc(taux)}" placeholder="ex. 26.1"></div>
+  <button class="btn" style="align-self:flex-end">Enregistrer</button></div>
+  <p class="hint" style="margin-top:8px">Indiquez le taux global URSSAF de votre activité (micro-BNC ≈ 26 %, à vérifier sur autoentrepreneur.urssaf.fr — les taux VDI diffèrent). Ce n'est qu'une estimation de pilotage : votre déclaration URSSAF reste la référence.</p></form>`;
+}
+
+/* ═════════ SÉANCE GUIDÉE ═════════ */
+const RDV_STEPS=['Préparation','Accueil','Soin','Conseils','Clôture'];
+function rdvCollect(){const r=state.rdv;if(!r)return;
+  ['etat','obs','conseils'].forEach(k=>{const el=document.querySelector(`#view [name=${k}]`);if(el)r.data[k]=el.value;});
+  const so=document.querySelector('#view [name=rdvSoin]');if(so)r.data.soinId=so.value;
+  const mo=document.querySelector('#view [name=rdvMontant]');if(mo)r.data.montant=mo.value;
+  const pa=document.querySelector('#view [name=rdvPaiement]');if(pa)r.data.paiement=pa.value;
+  const of=document.querySelector('#view [name=rdvOffert]');if(of)r.data.offert=of.checked;
+  const fc=document.querySelector('#view [name=ficheConseils]');if(fc)r.data.ficheConseils=fc.checked;}
+function viewRdv(){
+  const r=state.rdv;const c=C.get(r.clientId);if(!c){state.rdv=null;return viewClients();}
+  const d=r.data;
+  const dots=RDV_STEPS.map((t,i)=>`<span class="badge ${i===r.step?'ok':''}" style="${i<r.step?'opacity:.55':''}">${i+1}. ${t}</span>`).join(' ');
+  let body='';
+  if(r.step===0){
+    const dern=db.seances.filter(s=>s.clientId===c.id&&!s.prevu).sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,3);
+    const fConseils=db.fiches.filter(f=>f.clientId===c.id&&f.type==='conseils').sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
+    const fSuivi=db.fiches.filter(f=>f.clientId===c.id&&f.type==='suivi').sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
+    body=`<div class="card"><h2>Résumé automatique</h2>
+    ${dern.length?`<h3>Dernières prestations</h3><table><tbody>${dern.map(x=>`<tr><td>${fdate(x.date)}</td><td>${esc(x.designation)}</td><td>${esc((x.notes||'').slice(0,120))}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Première visite — aucune prestation passée.</p>'}
+    ${fConseils?`<h3 style="margin-top:12px">Derniers conseils donnés (${fdate(fConseils.date)})</h3>${fConseils.sections.filter(x=>x.texte.trim()).map(x=>`<p style="margin:4px 0"><strong>${esc(x.titre)} :</strong> ${esc(x.texte.slice(0,200))}</p>`).join('')}`:''}
+    ${fSuivi?`<h3 style="margin-top:12px">Dernier suivi (${fdate(fSuivi.date)})</h3>${fSuivi.sections.filter(x=>x.texte.trim()).slice(0,2).map(x=>`<p style="margin:4px 0"><strong>${esc(x.titre)} :</strong> ${esc(x.texte.slice(0,200))}</p>`).join('')}`:''}
+    ${c.notes?`<h3 style="margin-top:12px">Notes de suivi</h3><p>${esc(c.notes)}</p>`:''}
+    ${c.consentement?'':'<p style="margin-top:10px"><span class="badge warn">Consentement RGPD à recueillir aujourd\u2019hui</span></p>'}</div>`;
+  }else if(r.step===1){
+    body=`<div class="card"><h2>Vérifier ensemble</h2>
+    <p>📧 ${esc(c.email||'—')} · 📞 ${esc(c.tel||'—')}<br>🏠 ${esc(c.adresse||'')} ${esc(c.cp||'')} ${esc(c.ville||'')}</p>
+    <p class="hint" style="margin:8px 0 14px">Une info a changé ? Notez-le et corrigez la fiche après la séance.</p>
+    <label>Prise de nouvelles — comment va-t-elle depuis la dernière fois ?</label>
+    <textarea name="etat" placeholder="Sommeil, stress, digestion, énergie, événements…">${esc(d.etat)}</textarea></div>`;
+  }else if(r.step===2){
+    body=`<div class="card"><h2>Soin du jour</h2>
+    <div class="grid2"><div><label>Soin réalisé</label><select name="rdvSoin">${db.soins.map(x=>`<option value="${x.id}" ${x.id===d.soinId?'selected':''}>${esc(x.designation)}</option>`).join('')}</select></div></div>
+    <div style="margin-top:12px"><label>Observations pendant le soin</label>
+    <textarea name="obs" placeholder="Zones de tension, réactions, ressentis exprimés…">${esc(d.obs)}</textarea></div></div>`;
+  }else if(r.step===3){
+    body=`<div class="card"><h2>Conseils donnés</h2>
+    <textarea name="conseils" placeholder="Alimentation, hygiène de vie, plantes, auto-massages…">${esc(d.conseils)}</textarea>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer aussi une fiche de conseils imprimable à lui remettre</label></div>`;
+  }else{
+    const soin=db.soins.find(x=>x.id===d.soinId);
+    body=`<div class="card"><h2>Clôture</h2>
+    <div class="grid3">
+      <div><label>Montant (€)</label><input type="number" step="0.01" name="rdvMontant" value="${d.montant!==''?esc(d.montant):(soin?soin.prix:'')}"></div>
+      <div><label>Mode de paiement</label><select name="rdvPaiement">${MODES.map(m=>`<option ${m===d.paiement?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="rdvOffert" ${d.offert?'checked':''}> Prestation offerte</label></div></div>
+    <hr class="sep"><p class="hint">En validant : la prestation est enregistrée, une fiche de suivi est créée avec l'état du jour, les observations et les conseils${d.ficheConseils?', plus une fiche de conseils imprimable':''}.</p></div>`;
+  }
+  return`<div class="row" style="justify-content:space-between;margin-bottom:6px">
+    <button class="btn ghost sm" data-act="rdvQuit">✕ Quitter le mode séance</button></div>
+  <h1>Séance guidée — ${esc(C.name(c))}</h1>
+  <div class="row" style="margin:10px 0 16px">${dots}</div>
+  ${body}
+  <div class="row" style="justify-content:space-between;margin-top:4px">
+    <button class="btn ghost" data-act="rdvPrev" ${r.step===0?'disabled style="opacity:.4"':''}>← Précédent</button>
+    ${r.step<RDV_STEPS.length-1?'<button class="btn" data-act="rdvNext">Suivant →</button>':'<button class="btn" data-act="rdvSave">✓ Enregistrer la séance</button>'}
+  </div>`;
+}
+
 /* ═════════ CATALOGUE ═════════ */
 function viewCatalogue(){
   return`<h1>Catalogue</h1><p class="sub">Soins et produits — sert de référentiel aux imports Setmore et aux séances</p>
@@ -696,7 +819,7 @@ async function importRdv(file){
       const key=c.id+'|'+date+'|'+norm(designation);
       if(db.seances.some(s=>s.clientId+'|'+s.date+'|'+norm(s.designation)===key)){doublons++;return;}
       const prix=iP>=0?parseFloat(String(r[iP]).replace(/[^\d.,]/g,'').replace(',','.'))||0:(soin?soin.prix:0);
-      db.seances.push({id:uid('se'),clientId:c.id,date,soinId:soin?soin.id:'',designation,duree:soin?soin.duree:'',montant:prix,paiement:'',offert:false,notes:'Import Setmore'});
+      db.seances.push({id:uid('se'),clientId:c.id,date,soinId:soin?soin.id:'',designation,duree:soin?soin.duree:'',montant:prix,paiement:'',offert:false,prevu:date>today(),notes:'Import Setmore'});
       ajoutes++;
     });
     saveLocal();render();
@@ -830,13 +953,13 @@ function printCarte(cc){
 /* ═════════ ÉVÉNEMENTS ═════════ */
 document.addEventListener('click',async(e)=>{
   const nav=e.target.closest('#sidebar button[data-view]');
-  if(nav){state.view=nav.dataset.view;state.clientId=null;state.ficheEdit=null;render();return;}
+  if(nav){state.view=nav.dataset.view;state.clientId=null;state.ficheEdit=null;state.rdv=null;render();return;}
   const el=e.target.closest('[data-act]');if(!el)return;
   const act=el.dataset.act,id=el.dataset.id;
   const A={
     newClient(){const c=C.add({});saveLocal();state.clientId=c.id;state.tab='infos';render();},
     openClient(){state.view='clients';state.clientId=id;state.tab='infos';state.ficheEdit=null;render();},
-    backClients(){state.clientId=null;state.ficheEdit=null;render();},
+    backClients(){state.clientId=null;state.ficheEdit=null;state.rdv=null;render();},
     tab(){state.tab=el.dataset.tab;state.ficheEdit=null;render();},
     delClient(){const c=C.get(id);if(!confirm(`Supprimer définitivement ${C.name(c)} et TOUT son historique (séances, ventes, fiches, factures) ? Cette action répond au droit à l’effacement et est irréversible.`))return;
       db.clients=db.clients.filter(x=>x.id!==id);['seances','ventes','fiches','factures'].forEach(k=>db[k]=db[k].filter(x=>x.clientId!==id));
@@ -845,6 +968,28 @@ document.addEventListener('click',async(e)=>{
     rgpdExport(){const c=C.get(id);const data={cliente:c,seances:db.seances.filter(s=>s.clientId===id),ventes:db.ventes.filter(v=>v.clientId===id),fiches:db.fiches.filter(f=>f.clientId===id),factures:db.factures.filter(f=>f.clientId===id)};
       const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`donnees-${norm(C.name(c)).replace(/ /g,'-')}.json`;a.click();toast('Données de la cliente exportées');},
     delSeance(){db.seances=db.seances.filter(s=>s.id!==id);saveLocal();render();},
+    doneSeance(){const se=db.seances.find(x=>x.id===id);if(!se)return;
+      const m=prompt('Rendez-vous réalisé ✓ — mode de paiement ?\n'+MODES.join(' · ')+'\n(laissez vide si offert)','Espèces');
+      if(m===null)return;se.prevu=false;if(m.trim()){se.paiement=m.trim();}else{se.offert=true;se.montant=0;}
+      saveLocal();render();toast('Prestation confirmée');},
+    prepRdv(){state.view='clients';state.clientId=id;state.rdv={clientId:id,step:0,data:{etat:'',obs:'',conseils:'',soinId:db.soins[0]?db.soins[0].id:'',montant:'',paiement:MODES[0],offert:false,ficheConseils:false}};render();},
+    rdvQuit(){if(confirm('Quitter la séance guidée ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
+    rdvPrev(){rdvCollect();if(state.rdv.step>0)state.rdv.step--;render();},
+    rdvNext(){rdvCollect();if(state.rdv.step<RDV_STEPS.length-1)state.rdv.step++;render();},
+    rdvSave(){rdvCollect();const r=state.rdv;const c=C.get(r.clientId);const d=r.data;
+      const soin=db.soins.find(x=>x.id===d.soinId);
+      const notes=[d.etat&&('État du jour : '+d.etat),d.obs&&('Observations : '+d.obs)].filter(Boolean).join(' — ').slice(0,300);
+      db.seances.push({id:uid('se'),clientId:c.id,date:today(),soinId:d.soinId,designation:soin?soin.designation:'Soin',duree:soin?soin.duree:'',montant:d.offert?0:+d.montant||0,paiement:d.offert?'':d.paiement,offert:!!d.offert,notes});
+      const fs={id:uid('f'),clientId:c.id,type:'suivi',date:today(),titre:'Séance du '+new Date().toLocaleDateString('fr-FR'),sections:[
+        {titre:'Évolution depuis la dernière séance',texte:d.etat||''},
+        {titre:'Ressentis exprimés',texte:d.obs||''},
+        {titre:'Ajustements proposés',texte:d.conseils||''},
+        {titre:'Prochaine étape',texte:''}]};
+      db.fiches.push(fs);
+      if(d.ficheConseils&&d.conseils){db.fiches.push({id:uid('f'),clientId:c.id,type:'conseils',date:today(),titre:'Conseils du '+new Date().toLocaleDateString('fr-FR'),sections:FICHE_TPL.conseils.map(([t])=>({titre:t,texte:t==='Autres recommandations'?d.conseils:''}))});}
+      state.rdv=null;state.tab='fiches';saveLocal();render();
+      toast('Séance enregistrée ✓ prestation + fiche de suivi créées');},
+    delFin(){db.fin=db.fin.filter(f=>f.id!==id);saveLocal();render();},
     delVente(){db.ventes=db.ventes.filter(v=>v.id!==id);saveLocal();render();},
     newFiche(){const type=el.dataset.type;const c=C.get(el.dataset.id);
       const f={id:uid('f'),clientId:c.id,type,date:today(),titre:ficheLabel(type).replace('Fiche de ','')+' du '+new Date().toLocaleDateString('fr-FR'),sections:FICHE_TPL[type].map(([titre,texte])=>({titre,texte}))};
@@ -936,6 +1081,10 @@ document.addEventListener('submit',(e)=>{
     updProduit(){const x=db.produits.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,marque:d.marque||'',prix:+d.prix||0});state.editProduit=null;saveLocal();render();toast('Produit modifié');},
     addProduit(){db.produits.push({id:uid('p'),designation:d.designation,marque:d.marque||'',prix:+d.prix||0});saveLocal();render();},
     saveEnt(){Object.assign(db.settings.ent,d);saveLocal();render();toast('Informations enregistrées');},
+    addFin(){if(!(+d.montant>0))return toast('Indiquez un montant',true);
+      db.fin.push({id:uid('fi'),mois:d.mois,type:d.type,categorie:d.categorie,libelle:(d.libelle||'').trim(),montant:+d.montant});
+      state.finMois=d.mois;saveLocal();render();toast((d.type==='revenu'?'Revenu':'Charge')+' ajouté'+(d.type==='revenu'?'':'e'));},
+    saveFinTaux(){db.settings.fin.taux=(d.taux||'').trim();saveLocal();render();toast('Taux enregistré');},
     async unlock(){
       lockMsg('Déverrouillage…',true);
       try{ghToken=await vaultOpen(d.pw||'');}catch(e){ghToken='';return lockMsg('Mot de passe incorrect.');}
@@ -966,6 +1115,7 @@ document.addEventListener('change',async(e)=>{
   if(e.target.id==='mobileNav'){state.view=e.target.value;state.clientId=null;render();return;}
   if(e.target.id==='caisseMois'){state.caisseMois=e.target.value;render();return;}
   if(e.target.id==='caisseMode'){state.caisseMode=e.target.value;render();return;}
+  if(e.target.id==='finMoisSel'){state.finMois=e.target.value;render();return;}
   const el=e.target.closest('[data-act]');if(!el)return;
   const act=el.dataset.act;
   if(act==='toggleAuto'){store.set('inspireb_autosync',el.checked?'on':'off');toast(el.checked?'Envoi automatique activé':'Envoi automatique désactivé — pensez au bouton Synchroniser');return;}

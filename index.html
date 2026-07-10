@@ -107,14 +107,11 @@ h3{font-size:16px;color:var(--plum);margin-bottom:8px}
   main{padding:16px 12px;overflow-x:hidden}
   html,body{overflow-x:hidden;max-width:100vw}
   .grid2,.grid3,.grid4{grid-template-columns:1fr}
-  .card{padding:14px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{display:block;overflow-x:auto;white-space:nowrap;font-size:12.5px;-webkit-overflow-scrolling:touch}
+  .card{padding:14px;overflow:hidden;max-width:100%}
+  table{display:block;overflow-x:auto;max-width:100%;white-space:nowrap;font-size:12.5px;-webkit-overflow-scrolling:touch;border-radius:8px}
   td,th{padding:7px 8px}
   h1{font-size:22px}
   .row{gap:8px}
-  .row>*,.row input,.row select{min-width:0!important}
-  [style*="min-width"]{min-width:0!important}
-  [style*="max-width"]{max-width:100%!important}
   .tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px}
   .tabs button{white-space:nowrap;flex:none}
   .btn{padding:9px 13px}
@@ -221,11 +218,12 @@ const SEED_SOINS=[
   {id:'s6',designation:'Conseil Beauté',categorie:'Conseil',duree:60,prix:0},
   {id:'s7',designation:'Soin Duo Séréni\u2019Baie',categorie:'Duo',duree:90,prix:110},
 ];
-const DB_DEFAULT={v:3,clients:[],seances:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0}};
+const DB_DEFAULT={v:3,clients:[],seances:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],equipements:[],fin:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0}};
 let db=structuredClone(DB_DEFAULT);
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch(e){return false;}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 function saveLocal(){db.settings.gh.token='';store.set('inspireb_db',JSON.stringify(db));setDirty(true);scheduleAuto();}
-function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:''};db.counters.carteE=db.counters.carteE||0;}
+function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:''};db.counters.carteE=db.counters.carteE||0;
+  db.equipements=db.equipements||[];db.soins.forEach(s=>{if(s.coutVariable===undefined)s.coutVariable=0;if(s.equipementId===undefined)s.equipementId='';});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
 let dirty=false;function setDirty(d){dirty=d;const b=$('#syncBadge');if(b)b.style.display=d&&ghOK()?'inline-block':'none';updateSyncBtn();}
 function updateSyncBtn(){const b=$('#syncBtn');if(!b)return;if(!ghOK()){b.style.display='none';return;}
@@ -318,7 +316,7 @@ async function ghSave(){if(!ghOK())return{ok:false,msg:'GitHub non configuré'};
   }catch(e){return{ok:false,msg:'Connexion GitHub impossible'};}}
 
 /* ═════════ ÉTAT & RENDU ═════════ */
-let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null,finMois:today().slice(0,7),rdv:null};
+let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null,editEquip:null,finMois:today().slice(0,7),rdv:null};
 function render(){
   document.querySelectorAll('#sidebar button[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view===state.view));
   const mn=$('#mobileNav');if(mn)mn.value=state.view;
@@ -621,10 +619,12 @@ const FIN_CATS_CHG=['Achat produits / stock','Matériel','Abonnements & logiciel
 function finMois(mois){
   const caCRM=encaissements().filter(e=>(e.date||'').startsWith(mois)).reduce((s,e)=>s+e.montant,0);
   const revExt=db.fin.filter(f=>f.mois===mois&&f.type==='revenu').reduce((s,f)=>s+ +f.montant,0);
-  const charges=db.fin.filter(f=>f.mois===mois&&f.type==='charge').reduce((s,f)=>s+ +f.montant,0);
+  const chgFixes=db.fin.filter(f=>f.mois===mois&&f.type==='charge'&&f.nature!=='exceptionnelle').reduce((s,f)=>s+ +f.montant,0);
+  const chgExcep=db.fin.filter(f=>f.mois===mois&&f.type==='charge'&&f.nature==='exceptionnelle').reduce((s,f)=>s+ +f.montant,0);
+  const charges=chgFixes+chgExcep;
   const rev=caCRM+revExt;const taux=parseFloat(db.settings.fin.taux)||0;
   const cotis=taux?rev*taux/100:0;
-  return{caCRM,revExt,charges,rev,cotis,marge:rev-charges,net:rev-charges-cotis};
+  return{caCRM,revExt,chgFixes,chgExcep,charges,rev,cotis,marge:rev-charges,net:rev-charges-cotis};
 }
 function viewFinances(){
   const annee=state.finMois.slice(0,4);
@@ -637,29 +637,44 @@ function viewFinances(){
   return`<h1>Finances</h1><p class="sub">Pilotage : encaissements InspireB + revenus externes − charges. Estimation, ne remplace pas votre comptabilité officielle.</p>
   <div class="grid4">
     <div class="kpi"><div class="n">${eur(cur.rev)}</div><div class="l">Revenus ${state.finMois} (CRM ${eur(cur.caCRM)} + externe ${eur(cur.revExt)})</div></div>
-    <div class="kpi"><div class="n">${eur(cur.charges)}</div><div class="l">Charges ${state.finMois}</div></div>
+    <div class="kpi"><div class="n">${eur(cur.charges)}</div><div class="l">Charges ${state.finMois} <span class="hint">(fixes ${eur(cur.chgFixes)} · except. ${eur(cur.chgExcep)})</span></div></div>
     <div class="kpi"><div class="n">${eur(cur.marge)}</div><div class="l">Marge avant cotisations</div></div>
     <div class="kpi"><div class="n">${taux?eur(cur.net):'—'}</div><div class="l">${taux?'Reste estimé après cotisations ('+taux+'%)':'Renseignez votre taux de cotisations ci-dessous'}</div></div>
   </div>
   <form class="card" data-form="addFin" style="margin-top:18px"><h2>Ajouter un revenu externe ou une charge</h2>
   <div class="grid4">
     <div><label>Mois</label><input type="month" name="mois" value="${state.finMois}" required></div>
-    <div><label>Type</label><select name="type" id="finType"><option value="revenu">Revenu externe</option><option value="charge">Charge</option></select></div>
+    <div><label>Type</label><select name="type" id="finType" data-act="finTypeChange"><option value="revenu">Revenu externe</option><option value="charge">Charge</option></select></div>
     <div><label>Catégorie</label><select name="categorie">${[...FIN_CATS_REV,...FIN_CATS_CHG].map(c=>`<option>${c}</option>`).join('')}</select></div>
     <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
   </div>
-  <div class="row" style="margin-top:10px"><input name="libelle" placeholder="Libellé (facultatif) : ex. commission juin, achat huiles…" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div>
-  <p class="hint" style="margin-top:8px">Vos encaissements InspireB (prestations, produits, cartes, ateliers) sont déjà comptés automatiquement — n'ajoutez ici que ce qui vient d'ailleurs : commissions NuSkin/Jolimoi, affiliations… et vos charges.</p></form>
+  <div class="row" style="margin-top:10px" id="finNatureRow">
+    <div><label>Nature</label><select name="nature"><option value="fixe">Charge fixe (récurrente chaque mois)</option><option value="exceptionnelle">Charge exceptionnelle (ponctuelle)</option></select></div>
+    <input name="libelle" placeholder="Libellé (facultatif) : ex. abonnement Setmore, achat huiles…" style="flex:1;min-width:180px">
+    <button class="btn">Ajouter</button></div>
+  <p class="hint" style="margin-top:8px">Vos encaissements InspireB (prestations, produits, cartes, ateliers) sont déjà comptés automatiquement — n'ajoutez ici que ce qui vient d'ailleurs : commissions NuSkin/Jolimoi, affiliations… et vos charges. Une charge <strong>fixe</strong> revient chaque mois (abonnement, assurance…) ; une charge <strong>exceptionnelle</strong> est ponctuelle (gros achat, réparation…).</p></form>
   <div class="card"><div class="row" style="justify-content:space-between"><h2>Écritures de ${state.finMois}</h2><input type="month" id="finMoisSel" value="${state.finMois}" style="max-width:170px"></div>
-  ${entries.length?`<table><tbody>${entries.map(f=>`<tr><td>${f.type==='revenu'?'<span class="badge ok">Revenu</span>':'<span class="badge warn">Charge</span>'}</td><td>${esc(f.categorie)}${f.libelle?`<br><span class="hint">${esc(f.libelle)}</span>`:''}</td><td style="text-align:right">${eur(f.montant)}</td><td><button class="btn sm danger" data-act="delFin" data-id="${f.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune écriture ce mois-ci.</p>'}</div>
+  ${entries.length?`<table><tbody>${entries.map(f=>`<tr><td>${f.type==='revenu'?'<span class="badge ok">Revenu</span>':f.nature==='exceptionnelle'?'<span class="badge err">Charge except.</span>':'<span class="badge warn">Charge fixe</span>'}</td><td>${esc(f.categorie)}${f.libelle?`<br><span class="hint">${esc(f.libelle)}</span>`:''}</td><td style="text-align:right">${eur(f.montant)}</td><td><button class="btn sm danger" data-act="delFin" data-id="${f.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune écriture ce mois-ci.</p>'}
+  ${db.fin.some(f=>f.mois===state.finMois&&f.type==='charge'&&f.nature!=='exceptionnelle')?`<div class="row" style="margin-top:10px"><button class="btn ghost sm" data-act="dupFixes">↻ Reconduire les charges fixes vers le mois suivant</button></div>`:''}</div>
   <div class="card"><h2>Année ${annee}</h2>
-  <table><thead><tr><th>Mois</th><th style="text-align:right">CA InspireB</th><th style="text-align:right">Rev. externes</th><th style="text-align:right">Charges</th><th style="text-align:right">Marge</th>${taux?'<th style="text-align:right">Cotis. est.</th><th style="text-align:right">Net estimé</th>':''}</tr></thead><tbody>
-  ${rows.map(r=>`<tr><td>${r.mm}</td><td style="text-align:right">${eur(r.caCRM)}</td><td style="text-align:right">${eur(r.revExt)}</td><td style="text-align:right">${eur(r.charges)}</td><td style="text-align:right;font-weight:600">${eur(r.marge)}</td>${taux?`<td style="text-align:right">${eur(r.cotis)}</td><td style="text-align:right;font-weight:600">${eur(r.net)}</td>`:''}</tr>`).join('')}
-  <tr style="background:var(--sage-soft)"><td style="font-weight:700">Total</td><td style="text-align:right;font-weight:700">${eur(tot.caCRM)}</td><td style="text-align:right;font-weight:700">${eur(tot.revExt)}</td><td style="text-align:right;font-weight:700">${eur(tot.charges)}</td><td style="text-align:right;font-weight:700">${eur(tot.marge)}</td>${taux?`<td style="text-align:right;font-weight:700">${eur(tot.cotis)}</td><td style="text-align:right;font-weight:700">${eur(tot.net)}</td>`:''}</tr></tbody></table></div>
+  <table><thead><tr><th>Mois</th><th style="text-align:right">CA InspireB</th><th style="text-align:right">Rev. externes</th><th style="text-align:right">Ch. fixes</th><th style="text-align:right">Ch. except.</th><th style="text-align:right">Marge</th>${taux?'<th style="text-align:right">Cotis. est.</th><th style="text-align:right">Net estimé</th>':''}</tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${r.mm}</td><td style="text-align:right">${eur(r.caCRM)}</td><td style="text-align:right">${eur(r.revExt)}</td><td style="text-align:right">${eur(r.chgFixes)}</td><td style="text-align:right">${eur(r.chgExcep)}</td><td style="text-align:right;font-weight:600">${eur(r.marge)}</td>${taux?`<td style="text-align:right">${eur(r.cotis)}</td><td style="text-align:right;font-weight:600">${eur(r.net)}</td>`:''}</tr>`).join('')}
+  <tr style="background:var(--sage-soft)"><td style="font-weight:700">Total</td><td style="text-align:right;font-weight:700">${eur(tot.caCRM)}</td><td style="text-align:right;font-weight:700">${eur(tot.revExt)}</td><td style="text-align:right;font-weight:700">${eur(tot.chgFixes)}</td><td style="text-align:right;font-weight:700">${eur(tot.chgExcep)}</td><td style="text-align:right;font-weight:700">${eur(tot.marge)}</td>${taux?`<td style="text-align:right;font-weight:700">${eur(tot.cotis)}</td><td style="text-align:right;font-weight:700">${eur(tot.net)}</td>`:''}</tr></tbody></table></div>
   <form class="card" data-form="saveFinTaux"><h2>Estimation des cotisations</h2>
   <div class="row"><div style="max-width:220px"><label>Taux de cotisations estimé (%)</label><input type="number" step="0.1" name="taux" value="${esc(taux)}" placeholder="ex. 26.1"></div>
   <button class="btn" style="align-self:flex-end">Enregistrer</button></div>
-  <p class="hint" style="margin-top:8px">Indiquez le taux global URSSAF de votre activité (micro-BNC ≈ 26 %, à vérifier sur autoentrepreneur.urssaf.fr — les taux VDI diffèrent). Ce n'est qu'une estimation de pilotage : votre déclaration URSSAF reste la référence.</p></form>`;
+  <p class="hint" style="margin-top:8px">Indiquez le taux global URSSAF de votre activité (micro-BNC ≈ 26 %, à vérifier sur autoentrepreneur.urssaf.fr — les taux VDI diffèrent). Ce n'est qu'une estimation de pilotage : votre déclaration URSSAF reste la référence.</p></form>
+  ${(()=>{const real=db.seances.filter(s=>!s.prevu&&(s.date||'').startsWith(state.finMois));
+    if(!real.length)return'';
+    const bySoin={};real.forEach(s=>{const k=s.soinId||s.designation;(bySoin[k]=bySoin[k]||{designation:s.designation,soinId:s.soinId,nb:0,ca:0}).nb++;bySoin[k].ca+=(+s.montant||0);});
+    const lignes=Object.values(bySoin).map(g=>{const soin=g.soinId?db.soins.find(x=>x.id===g.soinId):null;
+      const cu=soin?soinCoutUnitaire(soin):0;const coutTotal=cu*g.nb;const marge=g.ca-coutTotal;
+      return{...g,cu,coutTotal,marge,pct:g.ca>0?(marge/g.ca*100):null};}).sort((a,b)=>b.ca-a.ca);
+    return`<div class="card"><h2>Rentabilité par soin — ${state.finMois}</h2>
+    <p class="hint" style="margin-bottom:10px">Estimation analytique (coûts variables + amortissement équipement) — distincte de la marge globale ci-dessus, qui reste basée sur vos charges réellement enregistrées. Sert à comparer vos soins entre eux, pas à recalculer votre résultat.</p>
+    <table><thead><tr><th>Soin</th><th style="text-align:right">Réalisés</th><th style="text-align:right">CA généré</th><th style="text-align:right">Coût/unité</th><th style="text-align:right">Coût total</th><th style="text-align:right">Marge estimée</th></tr></thead><tbody>
+    ${lignes.map(l=>`<tr><td>${esc(l.designation)}</td><td style="text-align:right">${l.nb}</td><td style="text-align:right">${eur(l.ca)}</td><td style="text-align:right">${eur(l.cu)}</td><td style="text-align:right">${eur(l.coutTotal)}</td><td style="text-align:right;font-weight:600">${eur(l.marge)}${l.pct!==null?` <span class="hint">(${l.pct.toFixed(0)}%)</span>`:''}</td></tr>`).join('')}
+    </tbody></table></div>`;})()}`;
 }
 
 /* ═════════ SÉANCE GUIDÉE ═════════ */
@@ -722,22 +737,47 @@ function viewRdv(){
 }
 
 /* ═════════ CATALOGUE ═════════ */
+function equipCoutUsage(eq){const p=+eq.prixAchat||0,d=+eq.dureeMois||1,u=+eq.usagesMois||1;return p/d/u;}
+function soinCoutUnitaire(s){const eq=s.equipementId?db.equipements.find(e=>e.id===s.equipementId):null;
+  return(+s.coutVariable||0)+(eq?equipCoutUsage(eq):0);}
 function viewCatalogue(){
   return`<h1>Catalogue</h1><p class="sub">Soins et produits — sert de référentiel aux imports Setmore et aux séances</p>
+  <div class="card"><h2>Équipements amortis</h2>
+  <p class="hint" style="margin-bottom:10px">Appareils NuSkin, LED, etc. Le coût par utilisation = prix d'achat ÷ durée d'amortissement ÷ utilisations par mois. Rattachez-les ensuite à un soin ci-dessous.</p>
+  <table><thead><tr><th>Équipement</th><th>Prix d'achat</th><th>Amorti sur</th><th>Usages/mois</th><th>Coût/utilisation</th><th></th></tr></thead><tbody>
+  ${db.equipements.map(e=>state.editEquip===e.id?`<tr><td colspan="6"><form class="row" data-form="updEquip" data-id="${e.id}">
+    <input name="nom" value="${esc(e.nom)}" required style="flex:2;min-width:150px">
+    <input type="number" step="0.01" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
+    <input type="number" name="dureeMois" value="${e.dureeMois}" placeholder="mois" style="max-width:80px">
+    <input type="number" name="usagesMois" value="${e.usagesMois}" placeholder="usages/mois" style="max-width:100px">
+    <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
+  :`<tr><td>${esc(e.nom)}</td><td>${eur(e.prixAchat)}</td><td>${e.dureeMois} mois</td><td>${e.usagesMois}/mois</td><td style="font-weight:600">${eur(equipCoutUsage(e))}</td><td class="row"><button class="btn sm ghost" data-act="editEquip" data-id="${e.id}">✎</button><button class="btn sm danger" data-act="delEquip" data-id="${e.id}">✕</button></td></tr>`).join('')||'<tr><td colspan="6" class="hint">Aucun équipement enregistré.</td></tr>'}</tbody></table>
+  <form class="row" data-form="addEquip" style="margin-top:12px">
+    <input name="nom" placeholder="Nom de l'appareil" required style="flex:2;min-width:160px">
+    <input type="number" step="0.01" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
+    <input type="number" name="dureeMois" placeholder="Amorti sur (mois)" value="36" style="max-width:130px">
+    <input type="number" name="usagesMois" placeholder="Usages estimés/mois" value="20" style="max-width:140px">
+    <button class="btn sm">+ Ajouter</button></form></div>
   <div class="card"><h2>Soins</h2>
-  <table><thead><tr><th>Désignation</th><th>Catégorie</th><th>Durée</th><th>Prix</th><th></th></tr></thead><tbody>
-  ${db.soins.map(s=>state.editSoin===s.id?`<tr><td colspan="5"><form class="row" data-form="updSoin" data-id="${s.id}">
+  <p class="hint" style="margin-bottom:10px">Coût variable = consommables (huile, dose de produit…). Équipement facultatif = appareil utilisé pendant ce soin.</p>
+  <table><thead><tr><th>Désignation</th><th>Catégorie</th><th>Durée</th><th>Prix</th><th>Coût variable</th><th>Équipement</th><th>Coût de revient</th><th></th></tr></thead><tbody>
+  ${db.soins.map(s=>state.editSoin===s.id?`<tr><td colspan="8"><form class="row" data-form="updSoin" data-id="${s.id}">
     <input name="designation" value="${esc(s.designation)}" required style="flex:2;min-width:150px">
     <input name="categorie" value="${esc(s.categorie)}" style="flex:1;min-width:100px">
     <input type="number" name="duree" value="${s.duree}" style="max-width:80px">
     <input type="number" step="0.01" name="prix" value="${s.prix}" style="max-width:90px">
+    <input type="number" step="0.01" name="coutVariable" value="${s.coutVariable||0}" placeholder="Coût variable €" style="max-width:120px">
+    <select name="equipementId" style="max-width:160px"><option value="">Aucun équipement</option>${db.equipements.map(e=>`<option value="${e.id}" ${e.id===s.equipementId?'selected':''}>${esc(e.nom)}</option>`).join('')}</select>
     <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
-  :`<tr><td>${esc(s.designation)}</td><td>${esc(s.categorie)}</td><td>${s.duree} min</td><td>${eur(s.prix)}</td><td class="row"><button class="btn sm ghost" data-act="editSoin" data-id="${s.id}">✎</button><button class="btn sm danger" data-act="delSoin" data-id="${s.id}">✕</button></td></tr>`).join('')}</tbody></table>
+  :(()=>{const cr=soinCoutUnitaire(s);const eq=s.equipementId?db.equipements.find(e=>e.id===s.equipementId):null;
+    return`<tr><td>${esc(s.designation)}</td><td>${esc(s.categorie)}</td><td>${s.duree} min</td><td>${eur(s.prix)}</td><td>${eur(s.coutVariable||0)}</td><td>${eq?esc(eq.nom):'<span class="hint">—</span>'}</td><td style="font-weight:600">${eur(cr)}</td><td class="row"><button class="btn sm ghost" data-act="editSoin" data-id="${s.id}">✎</button><button class="btn sm danger" data-act="delSoin" data-id="${s.id}">✕</button></td></tr>`;})()).join('')}</tbody></table>
   <form class="row" data-form="addSoin" style="margin-top:12px">
     <input name="designation" placeholder="Désignation" required style="flex:2;min-width:160px">
     <input name="categorie" placeholder="Catégorie" style="flex:1;min-width:110px">
     <input type="number" name="duree" placeholder="min" style="max-width:80px">
     <input type="number" step="0.01" name="prix" placeholder="€" style="max-width:90px">
+    <input type="number" step="0.01" name="coutVariable" placeholder="Coût variable €" style="max-width:130px">
+    <select name="equipementId" style="max-width:160px"><option value="">Aucun équipement</option>${db.equipements.map(e=>`<option value="${e.id}">${esc(e.nom)}</option>`).join('')}</select>
     <button class="btn sm">+ Ajouter</button></form></div>
   <div class="card"><h2>Produits</h2>
   <table><thead><tr><th>Désignation</th><th>Marque</th><th>Prix</th><th></th></tr></thead><tbody>
@@ -990,6 +1030,11 @@ document.addEventListener('click',async(e)=>{
       state.rdv=null;state.tab='fiches';saveLocal();render();
       toast('Séance enregistrée ✓ prestation + fiche de suivi créées');},
     delFin(){db.fin=db.fin.filter(f=>f.id!==id);saveLocal();render();},
+    dupFixes(){const cur=state.finMois;const[y,m]=cur.split('-').map(Number);const nd=new Date(y,m,1);const next=nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0');
+      const fixes=db.fin.filter(f=>f.mois===cur&&f.type==='charge'&&f.nature!=='exceptionnelle');
+      let ajout=0;fixes.forEach(f=>{const existe=db.fin.some(x=>x.mois===next&&x.type==='charge'&&x.categorie===f.categorie&&x.libelle===f.libelle);
+        if(!existe){db.fin.push({id:uid('fi'),mois:next,type:'charge',nature:'fixe',categorie:f.categorie,libelle:f.libelle,montant:f.montant});ajout++;}});
+      state.finMois=next;saveLocal();render();toast(ajout+' charge(s) fixe(s) reconduite(s) vers '+next);},
     delVente(){db.ventes=db.ventes.filter(v=>v.id!==id);saveLocal();render();},
     newFiche(){const type=el.dataset.type;const c=C.get(el.dataset.id);
       const f={id:uid('f'),clientId:c.id,type,date:today(),titre:ficheLabel(type).replace('Fiche de ','')+' du '+new Date().toLocaleDateString('fr-FR'),sections:FICHE_TPL[type].map(([titre,texte])=>({titre,texte}))};
@@ -1008,7 +1053,10 @@ document.addEventListener('click',async(e)=>{
     delSoin(){db.soins=db.soins.filter(s=>s.id!==id);saveLocal();render();},
     editSoin(){state.editSoin=id;state.editProduit=null;render();},
     editProduit(){state.editProduit=id;state.editSoin=null;render();},
-    cancelEdit(){state.editSoin=null;state.editProduit=null;render();},
+    cancelEdit(){state.editSoin=null;state.editProduit=null;state.editEquip=null;render();},
+    editEquip(){state.editEquip=id;state.editSoin=null;state.editProduit=null;render();},
+    delEquip(){if(db.soins.some(s=>s.equipementId===id))return toast('Un soin utilise encore cet équipement — modifiez-le d’abord',true);
+      db.equipements=db.equipements.filter(e=>e.id!==id);saveLocal();render();},
     editCarte(){state.editCarte=id;render();},
     cancelEditCarte(){state.editCarte=null;render();},
     delProduit(){db.produits=db.produits.filter(p=>p.id!==id);saveLocal();render();},
@@ -1075,14 +1123,18 @@ document.addEventListener('submit',(e)=>{
       if(!(+cc.montant>0)){cc.utilisations.push({date:d.date,montant:0,note:d.note||''});saveLocal();render();toast('Carte marquée comme utilisée');return;}
       const m=+d.montant||0;if(m<=0)return;if(m>carteSolde(cc))return toast('Montant supérieur au solde restant',true);
       cc.utilisations.push({date:d.date,montant:m,note:d.note||''});saveLocal();render();toast('Utilisation enregistrée — solde : '+eur(carteSolde(cc)));},
-    addSoin(){db.soins.push({id:uid('s'),designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0});saveLocal();render();},
-    updSoin(){const x=db.soins.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0});
+    addSoin(){db.soins.push({id:uid('s'),designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});saveLocal();render();},
+    updSoin(){const x=db.soins.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});
       db.seances.forEach(se=>{if(se.soinId===id)se.designation=x.designation;});state.editSoin=null;saveLocal();render();toast('Soin modifié');},
+    addEquip(){if(!(+d.prixAchat>0))return toast('Indiquez le prix d’achat',true);
+      db.equipements.push({id:uid('eq'),nom:d.nom,prixAchat:+d.prixAchat||0,dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});saveLocal();render();},
+    updEquip(){const x=db.equipements.find(v=>v.id===id);if(!x)return;Object.assign(x,{nom:d.nom,prixAchat:+d.prixAchat||0,dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});
+      state.editEquip=null;saveLocal();render();toast('Équipement modifié');},
     updProduit(){const x=db.produits.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,marque:d.marque||'',prix:+d.prix||0});state.editProduit=null;saveLocal();render();toast('Produit modifié');},
     addProduit(){db.produits.push({id:uid('p'),designation:d.designation,marque:d.marque||'',prix:+d.prix||0});saveLocal();render();},
     saveEnt(){Object.assign(db.settings.ent,d);saveLocal();render();toast('Informations enregistrées');},
     addFin(){if(!(+d.montant>0))return toast('Indiquez un montant',true);
-      db.fin.push({id:uid('fi'),mois:d.mois,type:d.type,categorie:d.categorie,libelle:(d.libelle||'').trim(),montant:+d.montant});
+      db.fin.push({id:uid('fi'),mois:d.mois,type:d.type,nature:d.type==='charge'?(d.nature||'fixe'):'',categorie:d.categorie,libelle:(d.libelle||'').trim(),montant:+d.montant});
       state.finMois=d.mois;saveLocal();render();toast((d.type==='revenu'?'Revenu':'Charge')+' ajouté'+(d.type==='revenu'?'':'e'));},
     saveFinTaux(){db.settings.fin.taux=(d.taux||'').trim();saveLocal();render();toast('Taux enregistré');},
     async unlock(){
@@ -1120,6 +1172,7 @@ document.addEventListener('change',async(e)=>{
   const act=el.dataset.act;
   if(act==='toggleAuto'){store.set('inspireb_autosync',el.checked?'on':'off');toast(el.checked?'Envoi automatique activé':'Envoi automatique désactivé — pensez au bouton Synchroniser');return;}
   if(act==='soinPick'){const s=db.soins.find(x=>x.id===el.value);const m=$('#seanceMontant');if(m&&s)m.value=s.prix;return;}
+  if(act==='finTypeChange'){const nr=$('#finNatureRow');if(nr)nr.style.display=el.value==='charge'?'flex':'none';return;}
   const file=el.files&&el.files[0];if(!file)return;
   toast('Lecture du fichier…');
   if(act==='fileContacts')importContacts(file);

@@ -316,7 +316,7 @@ async function ghSave(){if(!ghOK())return{ok:false,msg:'GitHub non configuré'};
   }catch(e){return{ok:false,msg:'Connexion GitHub impossible'};}}
 
 /* ═════════ ÉTAT & RENDU ═════════ */
-let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null,editEquip:null,finMois:today().slice(0,7),rdv:null};
+let state={view:'dash',clientId:null,tab:'infos',search:'',caisseMois:today().slice(0,7),caisseMode:'',ficheEdit:null,editSoin:null,editProduit:null,editCarte:null,editEquip:null,finMois:today().slice(0,7),finTab:'resultats',rdv:null};
 function render(){
   document.querySelectorAll('#sidebar button[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view===state.view));
   const mn=$('#mobileNav');if(mn)mn.value=state.view;
@@ -626,44 +626,29 @@ function finMois(mois){
   const cotis=taux?rev*taux/100:0;
   return{caCRM,revExt,chgFixes,chgExcep,charges,rev,cotis,marge:rev-charges,net:rev-charges-cotis};
 }
-function viewFinances(){
+function finMonthPicker(){return`<input type="month" id="finMoisSel" value="${state.finMois}" style="max-width:170px">`;}
+function finEntriesTable(list,natureLabel){
+  return list.length?`<table><tbody>${list.map(f=>`<tr><td>${esc(f.categorie)}${f.libelle?`<br><span class="hint">${esc(f.libelle)}</span>`:''}</td><td style="text-align:right">${eur(f.montant)}</td><td><button class="btn sm danger" data-act="delFin" data-id="${f.id}">✕</button></td></tr>`).join('')}</tbody></table>`
+  :`<p class="hint">Aucune ${natureLabel} ce mois-ci.</p>`;
+}
+function finResultats(){
   const annee=state.finMois.slice(0,4);
   const moisList=[];for(let m=1;m<=12;m++){const mm=annee+'-'+String(m).padStart(2,'0');if(mm<=today().slice(0,7)||db.fin.some(f=>f.mois===mm))moisList.push(mm);}
   const tot={caCRM:0,revExt:0,charges:0,rev:0,cotis:0,marge:0,net:0};
   const rows=moisList.map(mm=>{const r=finMois(mm);Object.keys(tot).forEach(k=>tot[k]+=r[k]);return{mm,...r};});
   const taux=db.settings.fin.taux;
-  const entries=db.fin.filter(f=>f.mois===state.finMois).sort((a,b)=>a.type.localeCompare(b.type));
   const cur=finMois(state.finMois);
-  return`<h1>Finances</h1><p class="sub">Pilotage : encaissements InspireB + revenus externes − charges. Estimation, ne remplace pas votre comptabilité officielle.</p>
-  <div class="grid4">
+  return`<div class="card"><div class="row" style="justify-content:space-between"><h2>Vue d'ensemble</h2>${finMonthPicker()}</div>
+  <div class="grid4" style="margin-top:12px">
     <div class="kpi"><div class="n">${eur(cur.rev)}</div><div class="l">Revenus ${state.finMois} (CRM ${eur(cur.caCRM)} + externe ${eur(cur.revExt)})</div></div>
     <div class="kpi"><div class="n">${eur(cur.charges)}</div><div class="l">Charges ${state.finMois} <span class="hint">(fixes ${eur(cur.chgFixes)} · except. ${eur(cur.chgExcep)})</span></div></div>
     <div class="kpi"><div class="n">${eur(cur.marge)}</div><div class="l">Marge avant cotisations</div></div>
-    <div class="kpi"><div class="n">${taux?eur(cur.net):'—'}</div><div class="l">${taux?'Reste estimé après cotisations ('+taux+'%)':'Renseignez votre taux de cotisations ci-dessous'}</div></div>
-  </div>
-  <form class="card" data-form="addFin" style="margin-top:18px"><h2>Ajouter un revenu externe ou une charge</h2>
-  <div class="grid4">
-    <div><label>Mois</label><input type="month" name="mois" value="${state.finMois}" required></div>
-    <div><label>Type</label><select name="type" id="finType" data-act="finTypeChange"><option value="revenu">Revenu externe</option><option value="charge">Charge</option></select></div>
-    <div><label>Catégorie</label><select name="categorie">${[...FIN_CATS_REV,...FIN_CATS_CHG].map(c=>`<option>${c}</option>`).join('')}</select></div>
-    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
-  </div>
-  <div class="row" style="margin-top:10px" id="finNatureRow">
-    <div><label>Nature</label><select name="nature"><option value="fixe">Charge fixe (récurrente chaque mois)</option><option value="exceptionnelle">Charge exceptionnelle (ponctuelle)</option></select></div>
-    <input name="libelle" placeholder="Libellé (facultatif) : ex. abonnement Setmore, achat huiles…" style="flex:1;min-width:180px">
-    <button class="btn">Ajouter</button></div>
-  <p class="hint" style="margin-top:8px">Vos encaissements InspireB (prestations, produits, cartes, ateliers) sont déjà comptés automatiquement — n'ajoutez ici que ce qui vient d'ailleurs : commissions NuSkin/Jolimoi, affiliations… et vos charges. Une charge <strong>fixe</strong> revient chaque mois (abonnement, assurance…) ; une charge <strong>exceptionnelle</strong> est ponctuelle (gros achat, réparation…).</p></form>
-  <div class="card"><div class="row" style="justify-content:space-between"><h2>Écritures de ${state.finMois}</h2><input type="month" id="finMoisSel" value="${state.finMois}" style="max-width:170px"></div>
-  ${entries.length?`<table><tbody>${entries.map(f=>`<tr><td>${f.type==='revenu'?'<span class="badge ok">Revenu</span>':f.nature==='exceptionnelle'?'<span class="badge err">Charge except.</span>':'<span class="badge warn">Charge fixe</span>'}</td><td>${esc(f.categorie)}${f.libelle?`<br><span class="hint">${esc(f.libelle)}</span>`:''}</td><td style="text-align:right">${eur(f.montant)}</td><td><button class="btn sm danger" data-act="delFin" data-id="${f.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune écriture ce mois-ci.</p>'}
-  ${db.fin.some(f=>f.mois===state.finMois&&f.type==='charge'&&f.nature!=='exceptionnelle')?`<div class="row" style="margin-top:10px"><button class="btn ghost sm" data-act="dupFixes">↻ Reconduire les charges fixes vers le mois suivant</button></div>`:''}</div>
+    <div class="kpi"><div class="n">${taux?eur(cur.net):'—'}</div><div class="l">${taux?'Reste estimé après cotisations ('+taux+'%)':'Taux non renseigné (onglet Cotisations)'}</div></div>
+  </div></div>
   <div class="card"><h2>Année ${annee}</h2>
   <table><thead><tr><th>Mois</th><th style="text-align:right">CA InspireB</th><th style="text-align:right">Rev. externes</th><th style="text-align:right">Ch. fixes</th><th style="text-align:right">Ch. except.</th><th style="text-align:right">Marge</th>${taux?'<th style="text-align:right">Cotis. est.</th><th style="text-align:right">Net estimé</th>':''}</tr></thead><tbody>
   ${rows.map(r=>`<tr><td>${r.mm}</td><td style="text-align:right">${eur(r.caCRM)}</td><td style="text-align:right">${eur(r.revExt)}</td><td style="text-align:right">${eur(r.chgFixes)}</td><td style="text-align:right">${eur(r.chgExcep)}</td><td style="text-align:right;font-weight:600">${eur(r.marge)}</td>${taux?`<td style="text-align:right">${eur(r.cotis)}</td><td style="text-align:right;font-weight:600">${eur(r.net)}</td>`:''}</tr>`).join('')}
   <tr style="background:var(--sage-soft)"><td style="font-weight:700">Total</td><td style="text-align:right;font-weight:700">${eur(tot.caCRM)}</td><td style="text-align:right;font-weight:700">${eur(tot.revExt)}</td><td style="text-align:right;font-weight:700">${eur(tot.chgFixes)}</td><td style="text-align:right;font-weight:700">${eur(tot.chgExcep)}</td><td style="text-align:right;font-weight:700">${eur(tot.marge)}</td>${taux?`<td style="text-align:right;font-weight:700">${eur(tot.cotis)}</td><td style="text-align:right;font-weight:700">${eur(tot.net)}</td>`:''}</tr></tbody></table></div>
-  <form class="card" data-form="saveFinTaux"><h2>Estimation des cotisations</h2>
-  <div class="row"><div style="max-width:220px"><label>Taux de cotisations estimé (%)</label><input type="number" step="0.1" name="taux" value="${esc(taux)}" placeholder="ex. 26.1"></div>
-  <button class="btn" style="align-self:flex-end">Enregistrer</button></div>
-  <p class="hint" style="margin-top:8px">Indiquez le taux global URSSAF de votre activité (micro-BNC ≈ 26 %, à vérifier sur autoentrepreneur.urssaf.fr — les taux VDI diffèrent). Ce n'est qu'une estimation de pilotage : votre déclaration URSSAF reste la référence.</p></form>
   ${(()=>{const real=db.seances.filter(s=>!s.prevu&&(s.date||'').startsWith(state.finMois));
     if(!real.length)return'';
     const bySoin={};real.forEach(s=>{const k=s.soinId||s.designation;(bySoin[k]=bySoin[k]||{designation:s.designation,soinId:s.soinId,nb:0,ca:0}).nb++;bySoin[k].ca+=(+s.montant||0);});
@@ -675,6 +660,76 @@ function viewFinances(){
     <table><thead><tr><th>Soin</th><th style="text-align:right">Réalisés</th><th style="text-align:right">CA généré</th><th style="text-align:right">Coût/unité</th><th style="text-align:right">Coût total</th><th style="text-align:right">Marge estimée</th></tr></thead><tbody>
     ${lignes.map(l=>`<tr><td>${esc(l.designation)}</td><td style="text-align:right">${l.nb}</td><td style="text-align:right">${eur(l.ca)}</td><td style="text-align:right">${eur(l.cu)}</td><td style="text-align:right">${eur(l.coutTotal)}</td><td style="text-align:right;font-weight:600">${eur(l.marge)}${l.pct!==null?` <span class="hint">(${l.pct.toFixed(0)}%)</span>`:''}</td></tr>`).join('')}
     </tbody></table></div>`;})()}`;
+}
+function finRevenus(){
+  const list=db.fin.filter(f=>f.mois===state.finMois&&f.type==='revenu');
+  return`<form class="card" data-form="addFin" data-type="revenu"><div class="row" style="justify-content:space-between"><h2>Revenus externes</h2>${finMonthPicker()}</div>
+  <p class="hint" style="margin:6px 0 12px">Tout ce qui n'est pas un encaissement InspireB (déjà compté automatiquement) : commissions NuSkin, Jolimoi, affiliation Novoma…</p>
+  <input type="hidden" name="mois" value="${state.finMois}"><input type="hidden" name="type" value="revenu">
+  <div class="grid3">
+    <div><label>Catégorie</label><select name="categorie">${FIN_CATS_REV.map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
+    <div><label>Libellé (facultatif)</label><input name="libelle" placeholder="ex. commission juin"></div></div>
+  <div class="row" style="margin-top:10px"><button class="btn">Ajouter</button></div></form>
+  <div class="card"><h2>Revenus externes de ${state.finMois}</h2>${finEntriesTable(list,'écriture')}</div>`;
+}
+function finFixes(){
+  const list=db.fin.filter(f=>f.mois===state.finMois&&f.type==='charge'&&f.nature!=='exceptionnelle');
+  return`<form class="card" data-form="addFin" data-type="charge" data-nature="fixe"><div class="row" style="justify-content:space-between"><h2>Charges fixes</h2>${finMonthPicker()}</div>
+  <p class="hint" style="margin:6px 0 12px">Ce qui revient chaque mois à l'identique ou presque : abonnements, assurance, loyer d'un local le cas échéant…</p>
+  <input type="hidden" name="mois" value="${state.finMois}"><input type="hidden" name="type" value="charge"><input type="hidden" name="nature" value="fixe">
+  <div class="grid3">
+    <div><label>Catégorie</label><select name="categorie">${FIN_CATS_CHG.map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
+    <div><label>Libellé (facultatif)</label><input name="libelle" placeholder="ex. abonnement Setmore"></div></div>
+  <div class="row" style="margin-top:10px"><button class="btn">Ajouter</button></div></form>
+  <div class="card"><div class="row" style="justify-content:space-between"><h2>Charges fixes de ${state.finMois}</h2>
+  ${list.length?`<button class="btn ghost sm" data-act="dupFixes">↻ Reconduire vers le mois suivant</button>`:''}</div>
+  ${finEntriesTable(list,'charge fixe')}</div>`;
+}
+function finExcept(){
+  const list=db.fin.filter(f=>f.mois===state.finMois&&f.type==='charge'&&f.nature==='exceptionnelle');
+  return`<form class="card" data-form="addFin" data-type="charge" data-nature="exceptionnelle"><div class="row" style="justify-content:space-between"><h2>Charges exceptionnelles</h2>${finMonthPicker()}</div>
+  <p class="hint" style="margin:6px 0 12px">Ce qui est ponctuel : gros achat, réparation, imprévu.</p>
+  <input type="hidden" name="mois" value="${state.finMois}"><input type="hidden" name="type" value="charge"><input type="hidden" name="nature" value="exceptionnelle">
+  <div class="grid3">
+    <div><label>Catégorie</label><select name="categorie">${FIN_CATS_CHG.map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" required></div>
+    <div><label>Libellé (facultatif)</label><input name="libelle" placeholder="ex. table de massage"></div></div>
+  <div class="row" style="margin-top:10px"><button class="btn">Ajouter</button></div></form>
+  <div class="card"><h2>Charges exceptionnelles de ${state.finMois}</h2>${finEntriesTable(list,'charge exceptionnelle')}</div>`;
+}
+function finEquip(){
+  return`<div class="card"><h2>Équipements amortis</h2>
+  <p class="hint" style="margin-bottom:10px">Appareils NuSkin, LED, etc. Coût par utilisation = prix d'achat ÷ durée d'amortissement ÷ utilisations par mois. Rattachez-les à un soin depuis le Catalogue.</p>
+  <table><thead><tr><th>Équipement</th><th>Prix d'achat</th><th>Amorti sur</th><th>Usages/mois</th><th>Coût/utilisation</th><th></th></tr></thead><tbody>
+  ${db.equipements.map(e=>state.editEquip===e.id?`<tr><td colspan="6"><form class="row" data-form="updEquip" data-id="${e.id}">
+    <input name="nom" value="${esc(e.nom)}" required style="flex:2;min-width:150px">
+    <input type="number" step="0.01" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
+    <input type="number" name="dureeMois" value="${e.dureeMois}" placeholder="mois" style="max-width:80px">
+    <input type="number" name="usagesMois" value="${e.usagesMois}" placeholder="usages/mois" style="max-width:100px">
+    <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
+  :`<tr><td>${esc(e.nom)}</td><td>${eur(e.prixAchat)}</td><td>${e.dureeMois} mois</td><td>${e.usagesMois}/mois</td><td style="font-weight:600">${eur(equipCoutUsage(e))}</td><td class="row"><button class="btn sm ghost" data-act="editEquip" data-id="${e.id}">✎</button><button class="btn sm danger" data-act="delEquip" data-id="${e.id}">✕</button></td></tr>`).join('')||'<tr><td colspan="6" class="hint">Aucun équipement enregistré.</td></tr>'}</tbody></table>
+  <form class="row" data-form="addEquip" style="margin-top:12px">
+    <input name="nom" placeholder="Nom de l'appareil" required style="flex:2;min-width:160px">
+    <input type="number" step="0.01" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
+    <input type="number" name="dureeMois" placeholder="Amorti sur (mois)" value="36" style="max-width:130px">
+    <input type="number" name="usagesMois" placeholder="Usages estimés/mois" value="20" style="max-width:140px">
+    <button class="btn sm">+ Ajouter</button></form></div>`;
+}
+function finReglages(){
+  const taux=db.settings.fin.taux;
+  return`<form class="card" data-form="saveFinTaux"><h2>Estimation des cotisations</h2>
+  <div class="row"><div style="max-width:220px"><label>Taux de cotisations estimé (%)</label><input type="number" step="0.1" name="taux" value="${esc(taux)}" placeholder="ex. 26.1"></div>
+  <button class="btn" style="align-self:flex-end">Enregistrer</button></div>
+  <p class="hint" style="margin-top:8px">Taux global URSSAF de votre activité (micro-BNC ≈ 26 %, à vérifier sur autoentrepreneur.urssaf.fr — les taux VDI diffèrent). Estimation de pilotage uniquement : votre déclaration URSSAF reste la référence.</p></form>`;
+}
+function viewFinances(){
+  const tabs=['resultats','revenus','fixes','except','equip','reglages'];
+  const tl={resultats:'Résultats',revenus:'Revenus',fixes:'Charges fixes',except:'Charges except.',equip:'Équipements',reglages:'Cotisations'};
+  const nav=`<div class="tabs">${tabs.map(t=>`<button data-act="finTab" data-tab="${t}" class="${(state.finTab||'resultats')===t?'on':''}">${tl[t]}</button>`).join('')}</div>`;
+  const body=({resultats:finResultats,revenus:finRevenus,fixes:finFixes,except:finExcept,equip:finEquip,reglages:finReglages})[state.finTab||'resultats']();
+  return`<h1>Finances</h1><p class="sub">Pilotage : encaissements InspireB + revenus externes − charges. Estimation, ne remplace pas votre comptabilité officielle.</p>${nav}${body}`;
 }
 
 /* ═════════ SÉANCE GUIDÉE ═════════ */
@@ -1001,6 +1056,7 @@ document.addEventListener('click',async(e)=>{
     openClient(){state.view='clients';state.clientId=id;state.tab='infos';state.ficheEdit=null;render();},
     backClients(){state.clientId=null;state.ficheEdit=null;state.rdv=null;render();},
     tab(){state.tab=el.dataset.tab;state.ficheEdit=null;render();},
+    finTab(){state.finTab=el.dataset.tab;state.editEquip=null;render();},
     delClient(){const c=C.get(id);if(!confirm(`Supprimer définitivement ${C.name(c)} et TOUT son historique (séances, ventes, fiches, factures) ? Cette action répond au droit à l’effacement et est irréversible.`))return;
       db.clients=db.clients.filter(x=>x.id!==id);['seances','ventes','fiches','factures'].forEach(k=>db[k]=db[k].filter(x=>x.clientId!==id));
       db.ateliers.forEach(a=>a.participants=(a.participants||[]).filter(p=>p.clientId!==id));
@@ -1034,7 +1090,7 @@ document.addEventListener('click',async(e)=>{
       const fixes=db.fin.filter(f=>f.mois===cur&&f.type==='charge'&&f.nature!=='exceptionnelle');
       let ajout=0;fixes.forEach(f=>{const existe=db.fin.some(x=>x.mois===next&&x.type==='charge'&&x.categorie===f.categorie&&x.libelle===f.libelle);
         if(!existe){db.fin.push({id:uid('fi'),mois:next,type:'charge',nature:'fixe',categorie:f.categorie,libelle:f.libelle,montant:f.montant});ajout++;}});
-      state.finMois=next;saveLocal();render();toast(ajout+' charge(s) fixe(s) reconduite(s) vers '+next);},
+      state.finMois=next;state.finTab='fixes';saveLocal();render();toast(ajout+' charge(s) fixe(s) reconduite(s) vers '+next);},
     delVente(){db.ventes=db.ventes.filter(v=>v.id!==id);saveLocal();render();},
     newFiche(){const type=el.dataset.type;const c=C.get(el.dataset.id);
       const f={id:uid('f'),clientId:c.id,type,date:today(),titre:ficheLabel(type).replace('Fiche de ','')+' du '+new Date().toLocaleDateString('fr-FR'),sections:FICHE_TPL[type].map(([titre,texte])=>({titre,texte}))};
@@ -1135,7 +1191,7 @@ document.addEventListener('submit',(e)=>{
     saveEnt(){Object.assign(db.settings.ent,d);saveLocal();render();toast('Informations enregistrées');},
     addFin(){if(!(+d.montant>0))return toast('Indiquez un montant',true);
       db.fin.push({id:uid('fi'),mois:d.mois,type:d.type,nature:d.type==='charge'?(d.nature||'fixe'):'',categorie:d.categorie,libelle:(d.libelle||'').trim(),montant:+d.montant});
-      state.finMois=d.mois;saveLocal();render();toast((d.type==='revenu'?'Revenu':'Charge')+' ajouté'+(d.type==='revenu'?'':'e'));},
+      state.finMois=d.mois;saveLocal();render();toast((d.type==='revenu'?'Revenu ajouté':d.nature==='exceptionnelle'?'Charge exceptionnelle ajoutée':'Charge fixe ajoutée'));},
     saveFinTaux(){db.settings.fin.taux=(d.taux||'').trim();saveLocal();render();toast('Taux enregistré');},
     async unlock(){
       lockMsg('Déverrouillage…',true);

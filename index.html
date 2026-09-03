@@ -501,9 +501,9 @@ function ficheEditor(f){
 function tabQuest(c){
   const q=c.questionnaire||[];
   return`<div class="card"><h2>Questionnaire d’accueil</h2>
-  ${q.length?`<p class="hint" style="margin-bottom:10px">Réponses importées de Google Forms le ${fdate(c.questionnaireDate)}.</p>
+  ${q.length?`<p class="hint" style="margin-bottom:10px">Réponses importées le ${fdate(c.questionnaireDate)}.</p>
   <table><tbody>${q.map(x=>`<tr><td style="width:45%;font-weight:600">${esc(x.q)}</td><td>${esc(x.r)}</td></tr>`).join('')}</tbody></table>`
-  :'<p class="hint">Aucune réponse rattachée. Importez le CSV Google Forms depuis l’onglet Imports : le rapprochement se fait automatiquement par email.</p>'}</div>`;
+  :'<p class="hint">Aucune réponse rattachée. Importez le CSV du questionnaire (Google Forms ou Tally) depuis l’onglet Imports : le rapprochement se fait automatiquement par email.</p>'}</div>`;
 }
 function tabFactures(c){
   const list=db.factures.filter(f=>f.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -858,8 +858,8 @@ function viewImports(){
   <div class="card"><h2>2 · Rendez-vous Setmore (.xlsx)</h2>
   <p class="hint" style="margin-bottom:8px">Setmore → Appointments → Export. Ajoute les prestations, associe le soin au catalogue, applique la durée du catalogue, ignore les créneaux personnels.</p>
   <div class="dropzone"><input type="file" accept=".xlsx" data-act="fileRdv"></div></div>
-  <div class="card"><h2>3 · Réponses Google Forms (.csv)</h2>
-  <p class="hint" style="margin-bottom:8px">Google Forms → Réponses → télécharger en .csv. Chaque réponse est rattachée à la cliente par son email.</p>
+  <div class="card"><h2>3 · Questionnaire d'accueil — Google Forms ou Tally (.csv)</h2>
+  <p class="hint" style="margin-bottom:8px">Google Forms : Réponses → ⋮ → Télécharger (.csv). Tally : onglet Réponses → Export → CSV. Chaque réponse est rattachée à la cliente par son email — les colonnes techniques (horodatage, ID de soumission) sont ignorées automatiquement.</p>
   <div class="dropzone"><input type="file" accept=".csv" data-act="fileForms"></div></div>
   <div class="card"><h2>4 · Abonnées MailerLite (.csv)</h2>
   <p class="hint" style="margin-bottom:8px">MailerLite → Subscribers → Export CSV (toutes les abonnées, actives et désabonnées si possible). Met à jour le statut newsletter, la date d’inscription et les groupes sur chaque fiche.</p>
@@ -924,8 +924,10 @@ async function importRdv(file){
 }
 function parseFRDate(v){v=String(v||'').trim();let m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];
   m=v.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);if(m)return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');return'';}
+const META_COL_RE=/^(horodateur|timestamp|submission ?id|respondent ?id|submitted ?at|id de la soumission|id du (repondant|destinataire)|date de soumission|response ?id|entry ?id)$/i;
+function isMetaCol(h,i){return i===0||META_COL_RE.test(norm(h||''));}
 function enrichirFiche(c,head,r,iE){let maj=0;
-  head.forEach((q,i)=>{const val=(r[i]||'').trim();if(!val||i===0||i===iE)return;const nq=norm(q);
+  head.forEach((q,i)=>{const val=(r[i]||'').trim();if(!val||isMetaCol(q,i)||i===iE)return;const nq=norm(q);
     const set=(k,v)=>{if(!c[k]){c[k]=v;maj++;}};
     if(/prenom/.test(nq))set('prenom',val);
     else if(/\bnom\b/.test(nq))set('nom',val);
@@ -946,7 +948,7 @@ async function importForms(file){
     const email=(r[iE]||'').trim();if(!email)return;
     const c=C.byEmail(email);
     if(!c){orphelins++;return;}
-    c.questionnaire=head.map((q,i)=>({q,r:r[i]||'',i})).filter(x=>x.i!==0&&x.i!==iE&&x.r.trim()!=='').map(({q,r})=>({q,r}));
+    c.questionnaire=head.map((q,i)=>({q,r:r[i]||'',i})).filter(x=>!isMetaCol(head[x.i],x.i)&&x.i!==iE&&x.r.trim()!=='').map(({q,r})=>({q,r}));
     c.questionnaireDate=today();lies++;champsMaj+=enrichirFiche(c,head,r,iE);
   });
   saveLocal();render();logImport(`<p>${lies} questionnaire(s) rattaché(s) · ${champsMaj} champ(s) de fiche complété(s) automatiquement (adresse, naissance, téléphone…) · ${orphelins} réponse(s) sans fiche cliente correspondante (créez la cliente puis ré-importez).</p>`);toast('Questionnaires importés');
@@ -954,7 +956,7 @@ async function importForms(file){
 async function importML(file){
   const rows=parseCSV(await file.text());if(rows.length<2)return toast('Fichier vide',true);
   const head=rows[0];
-  const iE=headerIndex(head,['email']);
+  const iE=headerIndex(head,['email','subscriber','abonné']);
   const iS=headerIndex(head,['status','statut','état']);
   const iD=headerIndex(head,['subscribe','date d','opt-in','created']);
   const iG=headerIndex(head,['group','groupe']);

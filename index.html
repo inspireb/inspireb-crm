@@ -868,7 +868,40 @@ function viewFinances(){
 
 /* ═════════ SÉANCE GUIDÉE ═════════ */
 const RDV_STEPS=['Préparation','Accueil','Soin','Conseils','Clôture'];
+function cardQuestRdv(c){
+  const edition=state.rdvQuestEdit;
+  const entete=`<div class="row" style="justify-content:space-between;align-items:flex-start">
+    <div><h2>Questionnaire d’accueil</h2><p class="hint">${qMaj(c)}</p></div>
+    <div class="row">
+      <button type="button" class="btn sm ${edition?'ghost':''}" data-act="rdvQuestMode" data-mode="lecture">Lire</button>
+      <button type="button" class="btn sm ${edition?'':'ghost'}" data-act="rdvQuestMode" data-mode="edition">✎ Compléter</button>
+    </div></div>`;
+  if(!edition)return`<div class="card">${entete}${synthQuest(c)}
+    ${qRepondu(c)?'':'<p class="hint">Elle n’a pas répondu au formulaire : passez en mode Compléter pour le remplir avec elle.</p>'}</div>`;
+  return`<div class="card">${entete}
+    <p class="hint">Les réponses sont enregistrées sur la fiche cliente, indépendamment de la séance en cours.</p></div>
+    <form data-form="saveQuest" data-id="${c.id}">${questBlocsHTML(c)}
+    <div class="card"><div class="row"><button class="btn">Enregistrer le questionnaire</button>
+    <span class="hint">Les blocs conditionnels apparaissent après enregistrement, selon les prestations cochées.</span></div></div></form>`;}
+function rdvQuestAutosave(){
+  const f=document.querySelector('#view form[data-form="saveQuest"]');if(!f)return false;
+  const c=C.get(f.dataset.id);if(!c)return false;
+  const FD=new FormData(f);let change=false;
+  c.rep=c.rep||{};c.repAutre=c.repAutre||{};
+  QUEST.forEach(q=>{const nm='q_'+q.id;
+    let v;
+    if(q.type==='multi')v=FD.getAll(nm).filter(x=>x!=='');
+    else v=(FD.get(nm)||'').trim();
+    const avant=JSON.stringify(c.rep[q.id]||(q.type==='multi'?[]:''));
+    if(q.type==='multi'){if(v.length)c.rep[q.id]=v;else delete c.rep[q.id];}
+    else{if(v)c.rep[q.id]=v;else delete c.rep[q.id];}
+    if(JSON.stringify(c.rep[q.id]||(q.type==='multi'?[]:''))!==avant)change=true;
+    const a=(FD.get('qa_'+q.id)||'').trim();
+    if(a)c.repAutre[q.id]=a;else delete c.repAutre[q.id];});
+  if(change){c.repDate=today();c.repSource='saisie au cabinet';saveLocal();toast('Questionnaire enregistré');}
+  return change;}
 function rdvCollect(){const r=state.rdv;if(!r)return;
+  rdvQuestAutosave();
   ['etat','obs','conseils'].forEach(k=>{const el=document.querySelector(`#view [name=${k}]`);if(el)r.data[k]=el.value;});
   const so=document.querySelector('#view [name=rdvSoin]');if(so)r.data.soinId=so.value;
   const mo=document.querySelector('#view [name=rdvMontant]');if(mo)r.data.montant=mo.value;
@@ -889,13 +922,15 @@ function viewRdv(){
     ${fConseils?`<h3 style="margin-top:12px">Derniers conseils donnés (${fdate(fConseils.date)})</h3>${fConseils.sections.filter(x=>x.texte.trim()).map(x=>`<p style="margin:4px 0"><strong>${esc(x.titre)} :</strong> ${esc(x.texte.slice(0,200))}</p>`).join('')}`:''}
     ${fSuivi?`<h3 style="margin-top:12px">Dernier suivi (${fdate(fSuivi.date)})</h3>${fSuivi.sections.filter(x=>x.texte.trim()).slice(0,2).map(x=>`<p style="margin:4px 0"><strong>${esc(x.titre)} :</strong> ${esc(x.texte.slice(0,200))}</p>`).join('')}`:''}
     ${c.notes?`<h3 style="margin-top:12px">Notes de suivi</h3><p>${esc(c.notes)}</p>`:''}
-    ${c.consentement?'':'<p style="margin-top:10px"><span class="badge warn">Consentement RGPD à recueillir aujourd\u2019hui</span></p>'}</div>`;
+    ${c.consentement?'':'<p style="margin-top:10px"><span class="badge warn">Consentement RGPD à recueillir aujourd\u2019hui</span></p>'}</div>
+    ${cardQuestRdv(c)}`;
   }else if(r.step===1){
     body=`<div class="card"><h2>Vérifier ensemble</h2>
     <p>📧 ${esc(c.email||'—')} · 📞 ${esc(c.tel||'—')}<br>🏠 ${esc(c.adresse||'')} ${esc(c.cp||'')} ${esc(c.ville||'')}</p>
     <p class="hint" style="margin:8px 0 14px">Une info a changé ? Notez-le et corrigez la fiche après la séance.</p>
     <label>Prise de nouvelles — comment va-t-elle depuis la dernière fois ?</label>
-    <textarea name="etat" placeholder="Sommeil, stress, digestion, énergie, événements…">${esc(d.etat)}</textarea></div>`;
+    <textarea name="etat" placeholder="Sommeil, stress, digestion, énergie, événements…">${esc(d.etat)}</textarea></div>
+    ${cardQuestRdv(c)}`;
   }else if(r.step===2){
     body=`<div class="card"><h2>Soin du jour</h2>
     <div class="grid2"><div><label>Soin réalisé</label><select name="rdvSoin">${db.soins.map(x=>`<option value="${x.id}" ${x.id===d.soinId?'selected':''}>${esc(x.designation)}</option>`).join('')}</select></div></div>
@@ -918,6 +953,7 @@ function viewRdv(){
     <button class="btn ghost sm" data-act="rdvQuit">✕ Quitter le mode séance</button></div>
   <h1>Séance guidée — ${esc(C.name(c))}</h1>
   <div class="row" style="margin:10px 0 16px">${dots}</div>
+  ${bandeauAlertes(c)}
   ${body}
   <div class="row" style="justify-content:space-between;margin-top:4px">
     <button class="btn ghost" data-act="rdvPrev" ${r.step===0?'disabled style="opacity:.4"':''}>← Précédent</button>
@@ -1208,16 +1244,31 @@ function champQ(c,q){
   if(q.type==='date')return`<input type="date" name="${n}" value="${esc(v)}">`;
   return`<textarea name="${n}" rows="2">${esc(v)}</textarea>`;}
 
-function tabQuest(c){
-  const maj=c.repDate?`Dernière mise à jour le ${fdate(c.repDate)}${c.repSource?' · '+esc(c.repSource):''}.`:'Jamais rempli.';
-  const blocs=QBLOCS.map(b=>{
+function qMaj(c){return c.repDate?`Dernière mise à jour le ${fdate(c.repDate)}${c.repSource?' · '+esc(c.repSource):''}.`:'Jamais rempli.';}
+function qAffiche(c,q){
+  const v=qVal(c,q.id),a=qAutre(c,q.id);
+  let t=Array.isArray(v)?v.join(', '):String(v||'');
+  if(a)t=(t?t+' · ':'')+'Autre : '+a;
+  return t;}
+function synthQuest(c){
+  const blocs=QBLOCS.filter(b=>blocVisible(c,b)).map(b=>{
+    const qs=QUEST.filter(q=>q.bloc===b.k&&qAffiche(c,q).trim()!=='');
+    if(!qs.length)return'';
+    return`<h3 style="margin:14px 0 4px;font-size:14px">${b.t}</h3>
+    <table><tbody>${qs.map(q=>`<tr><td style="width:42%;font-weight:600;vertical-align:top">${esc(q.q)}</td><td>${esc(qAffiche(c,q))}</td></tr>`).join('')}</tbody></table>`;}).join('');
+  return blocs||'<p class="hint">Aucune réponse enregistrée pour l’instant.</p>';}
+function questBlocsHTML(c){
+  return QBLOCS.map(b=>{
     const visible=blocVisible(c,b);
     const qs=QUEST.filter(q=>q.bloc===b.k);
     if(!qs.length)return'';
     if(!visible)return`<div class="card" style="opacity:.5"><h2 style="font-size:15px">${b.t}</h2>
       <p class="hint">Bloc masqué : ne s’applique pas aux prestations sélectionnées.</p></div>`;
     return`<div class="card"><h2 style="font-size:16px">${b.t}</h2>
-    ${qs.map(q=>`<div style="margin-bottom:14px"><label style="font-weight:600">${esc(q.q)}</label>${champQ(c,q)}</div>`).join('')}</div>`;}).join('');
+    ${qs.map(q=>`<div style="margin-bottom:14px"><label style="font-weight:600">${esc(q.q)}</label>${champQ(c,q)}</div>`).join('')}</div>`;}).join('');}
+function tabQuest(c){
+  const maj=qMaj(c);
+  const blocs=questBlocsHTML(c);
   const legacy=(c.questionnaire||[]).length?`<div class="card"><h2>Ancien import (format brut)</h2>
     <table><tbody>${c.questionnaire.map(x=>`<tr><td style="width:45%;font-weight:600">${esc(x.q)}</td><td>${esc(x.r)}</td></tr>`).join('')}</tbody></table>
     <p class="hint" style="margin-top:8px">Conservé pour mémoire. Recopiez ce qui vous sert dans les champs ci-dessus, puis ce bloc pourra être supprimé.</p>
@@ -1447,7 +1498,8 @@ document.addEventListener('click',async(e)=>{
       const m=prompt('Rendez-vous réalisé ✓ — mode de paiement ?\n'+MODES.join(' · ')+'\n(laissez vide si offert)','Espèces');
       if(m===null)return;se.prevu=false;if(m.trim()){se.paiement=m.trim();}else{se.offert=true;se.montant=0;}
       saveLocal();render();toast('Prestation confirmée');},
-    prepRdv(){state.view='clients';state.clientId=id;state.rdv={clientId:id,step:0,data:{etat:'',obs:'',conseils:'',soinId:db.soins[0]?db.soins[0].id:'',montant:'',paiement:MODES[0],offert:false,ficheConseils:false}};render();},
+    prepRdv(){state.view='clients';state.clientId=id;state.rdvQuestEdit=false;state.rdv={clientId:id,step:0,data:{etat:'',obs:'',conseils:'',soinId:db.soins[0]?db.soins[0].id:'',montant:'',paiement:MODES[0],offert:false,ficheConseils:false}};render();},
+    rdvQuestMode(){state.rdvQuestEdit=el.dataset.mode==='edition';render();},
     rdvQuit(){if(confirm('Quitter la séance guidée ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
     rdvPrev(){rdvCollect();if(state.rdv.step>0)state.rdv.step--;render();},
     rdvNext(){rdvCollect();if(state.rdv.step<RDV_STEPS.length-1)state.rdv.step++;render();},

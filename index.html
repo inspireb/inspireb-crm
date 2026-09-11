@@ -362,8 +362,10 @@ function viewDash(){
     <div class="kpi"><div class="n">${eur(soldes)}</div><div class="l">Cartes cadeaux en circulation</div></div>
   </div>
   ${(()=>{const fin=new Date(Date.now()+7*864e5).toISOString().slice(0,10);
-  const sem=db.seances.filter(s=>s.prevu&&s.date>=today()&&s.date<=fin).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  if(!sem.length)return'';
+  const sem=db.seances.filter(s=>s.date&&s.date>=today()&&s.date<=fin).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const suivants=db.seances.filter(s=>s.date&&s.date>fin).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  if(!sem.length)return`<div class="card" style="margin-top:18px"><h2>📅 Rendez-vous des 7 prochains jours</h2>
+  <p class="hint">Aucun rendez-vous daté entre aujourd’hui et le ${fdate(fin)}.${suivants.length?` Le suivant est le ${fdate(suivants[0].date)} (${esc(suivants[0].designation||'prestation')}).`:' Aucune prestation à venir n’est enregistrée : ajoutez-la depuis la fiche cliente, ou importez vos rendez-vous Setmore.'}</p></div>`;
   const jour=(d)=>{const dt=new Date(d+'T00:00:00');return dt.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});};
   return`<div class="card" style="margin-top:18px"><h2>📅 Rendez-vous des 7 prochains jours</h2>
   <table><tbody>${sem.map(s=>`<tr><td style="white-space:nowrap">${jour(s.date)}</td>
@@ -371,7 +373,17 @@ function viewDash(){
   <td>${esc(s.designation)}</td>
   <td style="text-align:right"><button class="btn sm soft" data-act="prepRdv" data-id="${s.clientId}">▶ Préparer</button></td></tr>`).join('')}</tbody></table></div>`;})()}
   ${(()=>{const rel=cartesARelancer();
-  return rel.length?`<div class="card" style="margin-top:18px"><h2>🎁 Cartes cadeaux à relancer</h2>
+  if(!rel.length){
+    const vives=db.cartes.filter(cc=>!carteEpuisee(cc)&&!cartePerimee(cc));
+    const per=db.cartes.filter(cc=>!carteEpuisee(cc)&&cartePerimee(cc));
+    const util=db.cartes.filter(cc=>carteEpuisee(cc));
+    if(!db.cartes.length)return'';
+    return`<div class="card" style="margin-top:18px"><h2>🎁 Cartes cadeaux à relancer</h2>
+    <p class="hint">Aucune relance à faire aujourd’hui. Sur ${db.cartes.length} carte${db.cartes.length>1?'s':''} émise${db.cartes.length>1?'s':''} : <b>${vives.length}</b> en cours et récente${vives.length>1?'s':''} (moins de 6 mois depuis l’achat ou la dernière relance), <b>${util.length}</b> déjà utilisée${util.length>1?'s':''}, <b>${per.length}</b> périmée${per.length>1?'s':''}.</p>
+    ${per.length?`<table><thead><tr><th>N°</th><th>Bénéficiaire</th><th>Valeur</th><th>Validité dépassée le</th></tr></thead><tbody>
+    ${per.map(cc=>`<tr><td style="font-weight:600">${esc(cc.num)}</td><td>${esc(cc.beneficiaire||'—')}</td><td>${+cc.montant>0?eur(carteSolde(cc)):esc(cc.soin||'Soin offert')}</td><td><span class="badge err">${fdate(cc.validite)}</span></td></tr>`).join('')}
+    </tbody></table><p class="hint" style="margin-top:8px">Les cartes périmées ne sont pas relancées automatiquement. À toi de voir si tu acceptes de les honorer.</p>`:''}</div>`;}
+  return `<div class="card" style="margin-top:18px"><h2>🎁 Cartes cadeaux à relancer</h2>
   <p class="hint" style="margin-bottom:10px">Non utilisées depuis 6 mois ou plus — le délai repart à chaque relance notée.</p>
   <table><thead><tr><th>N°</th><th>Bénéficiaire</th><th>Valeur</th><th>Sans nouvelle depuis</th><th></th></tr></thead><tbody>
   ${rel.map(cc=>{const j=carteJoursDepuis(cc);const ach=cc.acheteuseId?C.get(cc.acheteuseId):null;
@@ -381,7 +393,7 @@ function viewDash(){
     <td><span class="badge warn">${Math.floor(j/30)} mois</span>${(cc.relances||[]).length?` <span class="hint">${(cc.relances||[]).length} relance(s)</span>`:''}</td>
     <td style="text-align:right"><button class="btn sm soft" data-act="goCarte" data-id="${cc.id}">Ouvrir</button>
     <button class="btn sm" data-act="relanceCarte" data-id="${cc.id}">✓ Relancée</button></td></tr>`;}).join('')}
-  </tbody></table></div>`:'';})()}
+  </tbody></table></div>`;})()}
   ${(()=>{const an=prochainsAnniv(30);return an.length?`<div class="card" style="margin-top:18px"><h2>🎂 Anniversaires dans les 30 jours</h2>
   <table><tbody>${an.map(a=>`<tr><td><span class="clickable" data-act="openClient" data-id="${a.c.id}">${esc(C.name(a.c))}</span></td>
   <td>${a.next.toLocaleDateString('fr-FR',{day:'numeric',month:'long'})}</td>

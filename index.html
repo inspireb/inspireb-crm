@@ -191,6 +191,7 @@ const MODES=['Espèces','Carte bancaire','Virement','PayPal','Chèque','Carte ca
 let toastT;function toast(msg,err){const t=$('#toast');t.textContent=msg;t.className=err?'err show':'show';clearTimeout(toastT);toastT=setTimeout(()=>t.className='',3200);}
 
 /* Parseur CSV robuste (champs entre guillemets, virgules et retours ligne inclus) */
+function numFR(v){if(v===undefined||v===null)return 0;const x=String(v).replace(/\s|\u00a0|€/g,'').replace(',','.');const n=parseFloat(x);return isFinite(n)?n:0;}
 function parseCSV(text,sep){
   if(!sep){const l=text.slice(0,2000);sep=(l.split(';').length>l.split(',').length)?';':',';}
   const rows=[];let row=[],cur='',q=false;
@@ -434,6 +435,14 @@ function tabInfos(c){
     <label class="check"><input type="checkbox" name="nuskin" ${c.nuskin?'checked':''}> Cliente NuSkin</label>
     <label class="check"><input type="checkbox" name="jolimoi" ${c.jolimoi?'checked':''}> Cliente Jolimoi</label>
     <label class="check"><input type="checkbox" name="consentement" ${c.consentement?'checked':''}> Consentement RGPD recueilli</label>
+  </div>
+  <div class="grid3" style="margin-top:12px">
+    <div><label>Newsletter</label><select name="newsletter">
+      <option value="" ${!c.newsletter?'selected':''}>Inconnu — pas encore demandé</option>
+      <option value="oui" ${c.newsletter&&c.newsletter.abonnee?'selected':''}>Abonnée (consentement donné)</option>
+      <option value="non" ${c.newsletter&&!c.newsletter.abonnee?'selected':''}>Désabonnée / refus</option>
+    </select></div>
+    <div style="grid-column:span 2"><p class="hint" style="margin:22px 0 0">Se règle aussi par l’import MailerLite. La saisie manuelle ici fait foi et écrase l’import précédent.</p></div>
   </div>
   <div style="margin-top:12px"><label>Notes de suivi (préférences, contre-indications, contexte…)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
   <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button></div></form>
@@ -705,14 +714,14 @@ function finEquip(){
   <table><thead><tr><th>Équipement</th><th>Prix d'achat</th><th>Amorti sur</th><th>Usages/mois</th><th>Coût/utilisation</th><th></th></tr></thead><tbody>
   ${db.equipements.map(e=>state.editEquip===e.id?`<tr><td colspan="6"><form class="row" data-form="updEquip" data-id="${e.id}">
     <input name="nom" value="${esc(e.nom)}" required style="flex:2;min-width:150px">
-    <input type="number" step="0.01" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
+    <input type="text" inputmode="decimal" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
     <input type="number" name="dureeMois" value="${e.dureeMois}" placeholder="mois" style="max-width:80px">
     <input type="number" name="usagesMois" value="${e.usagesMois}" placeholder="usages/mois" style="max-width:100px">
     <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
   :`<tr><td>${esc(e.nom)}</td><td>${eur(e.prixAchat)}</td><td>${e.dureeMois} mois</td><td>${e.usagesMois}/mois</td><td style="font-weight:600">${eur(equipCoutUsage(e))}</td><td class="row"><button class="btn sm ghost" data-act="editEquip" data-id="${e.id}">✎</button><button class="btn sm danger" data-act="delEquip" data-id="${e.id}">✕</button></td></tr>`).join('')||'<tr><td colspan="6" class="hint">Aucun équipement enregistré.</td></tr>'}</tbody></table>
   <form class="row" data-form="addEquip" style="margin-top:12px">
     <input name="nom" placeholder="Nom de l'appareil" required style="flex:2;min-width:160px">
-    <input type="number" step="0.01" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
+    <input type="text" inputmode="decimal" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
     <input type="number" name="dureeMois" placeholder="Amorti sur (mois)" value="36" style="max-width:130px">
     <input type="number" name="usagesMois" placeholder="Usages estimés/mois" value="20" style="max-width:140px">
     <button class="btn sm">+ Ajouter</button></form></div>`;
@@ -802,14 +811,14 @@ function viewCatalogue(){
   <table><thead><tr><th>Équipement</th><th>Prix d'achat</th><th>Amorti sur</th><th>Usages/mois</th><th>Coût/utilisation</th><th></th></tr></thead><tbody>
   ${db.equipements.map(e=>state.editEquip===e.id?`<tr><td colspan="6"><form class="row" data-form="updEquip" data-id="${e.id}">
     <input name="nom" value="${esc(e.nom)}" required style="flex:2;min-width:150px">
-    <input type="number" step="0.01" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
+    <input type="text" inputmode="decimal" name="prixAchat" value="${e.prixAchat}" placeholder="Prix €" style="max-width:100px">
     <input type="number" name="dureeMois" value="${e.dureeMois}" placeholder="mois" style="max-width:80px">
     <input type="number" name="usagesMois" value="${e.usagesMois}" placeholder="usages/mois" style="max-width:100px">
     <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
   :`<tr><td>${esc(e.nom)}</td><td>${eur(e.prixAchat)}</td><td>${e.dureeMois} mois</td><td>${e.usagesMois}/mois</td><td style="font-weight:600">${eur(equipCoutUsage(e))}</td><td class="row"><button class="btn sm ghost" data-act="editEquip" data-id="${e.id}">✎</button><button class="btn sm danger" data-act="delEquip" data-id="${e.id}">✕</button></td></tr>`).join('')||'<tr><td colspan="6" class="hint">Aucun équipement enregistré.</td></tr>'}</tbody></table>
   <form class="row" data-form="addEquip" style="margin-top:12px">
     <input name="nom" placeholder="Nom de l'appareil" required style="flex:2;min-width:160px">
-    <input type="number" step="0.01" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
+    <input type="text" inputmode="decimal" name="prixAchat" placeholder="Prix d'achat €" style="max-width:110px">
     <input type="number" name="dureeMois" placeholder="Amorti sur (mois)" value="36" style="max-width:130px">
     <input type="number" name="usagesMois" placeholder="Usages estimés/mois" value="20" style="max-width:140px">
     <button class="btn sm">+ Ajouter</button></form></div>
@@ -954,24 +963,31 @@ async function importForms(file){
   saveLocal();render();logImport(`<p>${lies} questionnaire(s) rattaché(s) · ${champsMaj} champ(s) de fiche complété(s) automatiquement (adresse, naissance, téléphone…) · ${orphelins} réponse(s) sans fiche cliente correspondante (créez la cliente puis ré-importez).</p>`);toast('Questionnaires importés');
 }
 async function importML(file){
-  const rows=parseCSV(await file.text());if(rows.length<2)return toast('Fichier vide',true);
-  const head=rows[0];
-  const iE=headerIndex(head,['email','subscriber','abonné']);
-  const iS=headerIndex(head,['status','statut','état']);
-  const iD=headerIndex(head,['subscribe','date d','opt-in','created']);
-  const iG=headerIndex(head,['group','groupe']);
-  if(iE<0)return toast('Colonne Email introuvable dans l’export MailerLite',true);
-  let maj=0,inconnues=0;
+  let txt=await file.text();
+  if(txt.charCodeAt(0)===0xFEFF)txt=txt.slice(1);
+  const rows=parseCSV(txt);if(rows.length<2)return toast('Fichier vide ou illisible',true);
+  const head=rows[0].map(x=>(x||'').trim());
+  const iE=headerIndex(head,['email','e-mail','mail','courriel','subscriber','abonn']);
+  const iS=headerIndex(head,['status','statut','état','etat','state','subscription']);
+  const iD=headerIndex(head,['subscribe','date d','opt-in','optin','created','inscri']);
+  const iG=headerIndex(head,['group','groupe','segment','liste','list']);
+  const diag=`<p class="hint">Colonnes détectées — email : <b>${iE>=0?esc(head[iE]):'aucune'}</b> · statut : <b>${iS>=0?esc(head[iS]):'aucune (toutes considérées abonnées)'}</b> · date : <b>${iD>=0?esc(head[iD]):'aucune'}</b> · groupe : <b>${iG>=0?esc(head[iG]):'aucune'}</b><br>En-têtes du fichier : ${head.map(h=>esc(h)).join(' · ')}</p>`;
+  if(iE<0){logImport(diag+`<p>Aucune colonne email trouvée : l’import est impossible. Vérifiez que l’export MailerLite contient bien une colonne d’adresses.</p>`);return toast('Colonne email introuvable',true);}
+  let maj=0;const inconnues=[];
   rows.slice(1).forEach(r=>{
-    const email=(r[iE]||'').trim();if(!email)return;
+    const email=(r[iE]||'').trim();if(!email||email.indexOf('@')<0)return;
     const c=C.byEmail(email);
-    if(!c){inconnues++;return;}
+    if(!c){inconnues.push(email);return;}
     const st=iS>=0?norm(r[iS]):'active';
-    c.newsletter={abonnee:/activ|abonn|subscrib/.test(st)&&!/unsub|desabon|désabon/.test(st),
-      statut:iS>=0?r[iS]:'active',date:iD>=0?(r[iD]||'').slice(0,10):'',groupes:iG>=0?(r[iG]||''):''};
+    const desab=/unsub|desabon|désabon|unconfirm|bounce|junk|spam|inactive/.test(st);
+    c.newsletter={abonnee:!desab,statut:iS>=0?r[iS]:'active (aucun statut dans le fichier)',
+      date:iD>=0?(r[iD]||'').slice(0,10):'',groupes:iG>=0?(r[iG]||''):''};
     maj++;
   });
-  saveLocal();render();logImport(`<p>${maj} fiche(s) mise(s) à jour avec le statut newsletter · ${inconnues} abonnée(s) sans fiche cliente (normal si elles ne sont pas encore clientes).</p>`);toast('Statuts newsletter importés');
+  saveLocal();render();
+  const liste=inconnues.length?`<p>${inconnues.length} adresse(s) sans fiche cliente correspondante. C’est normal pour des abonnées qui ne sont pas encore clientes. Premières adresses concernées :</p><p class="hint">${inconnues.slice(0,15).map(e=>esc(e)).join(' · ')}${inconnues.length>15?' …':''}</p>`:'';
+  logImport(diag+`<p><b>${maj}</b> fiche(s) mise(s) à jour avec le statut newsletter.</p>`+liste);
+  toast(maj?`${maj} statut(s) newsletter importé(s)`:'Aucune correspondance trouvée — voir le détail',!maj);
 }
 
 /* ═════════ RÉGLAGES ═════════ */
@@ -1143,6 +1159,10 @@ document.addEventListener('submit',(e)=>{
   const F={
     saveClient(){const c=C.get(id);Object.assign(c,{prenom:d.prenom,nom:d.nom,naissance:d.naissance,email:d.email,tel:d.tel,statut:d.statut,adresse:d.adresse,cp:d.cp,ville:d.ville,notes:d.notes,nuskin:!!d.nuskin,jolimoi:!!d.jolimoi});
       if(d.consentement&&!c.consentement)c.consentementDate=today();c.consentement=!!d.consentement;
+      const prevNl=c.newsletter||{};
+      if(d.newsletter==='oui')c.newsletter={abonnee:true,statut:'Abonnée (saisie manuelle)',date:prevNl.date||today(),groupes:prevNl.groupes||''};
+      else if(d.newsletter==='non')c.newsletter={abonnee:false,statut:'Désabonnée (saisie manuelle)',date:prevNl.date||'',groupes:prevNl.groupes||''};
+      else c.newsletter=null;
       saveLocal();render();toast('Fiche enregistrée');},
     addSeance(){const soin=db.soins.find(s=>s.id===d.soinId);
       db.seances.push({id:uid('se'),clientId:id,date:d.date,soinId:d.soinId,designation:soin?soin.designation:'Soin',duree:soin?soin.duree:'',montant:d.offert?0:+d.montant||0,paiement:d.offert?'':d.paiement,offert:!!d.offert,notes:d.notes||''});
@@ -1184,9 +1204,11 @@ document.addEventListener('submit',(e)=>{
     addSoin(){db.soins.push({id:uid('s'),designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});saveLocal();render();},
     updSoin(){const x=db.soins.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});
       db.seances.forEach(se=>{if(se.soinId===id)se.designation=x.designation;});state.editSoin=null;saveLocal();render();toast('Soin modifié');},
-    addEquip(){if(!(+d.prixAchat>0))return toast('Indiquez le prix d’achat',true);
-      db.equipements.push({id:uid('eq'),nom:d.nom,prixAchat:+d.prixAchat||0,dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});saveLocal();render();},
-    updEquip(){const x=db.equipements.find(v=>v.id===id);if(!x)return;Object.assign(x,{nom:d.nom,prixAchat:+d.prixAchat||0,dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});
+    addEquip(){if(!(d.nom||'').trim())return toast('Indiquez le nom de l’appareil',true);
+      const pa=numFR(d.prixAchat);
+      db.equipements.push({id:uid('eq'),nom:d.nom,prixAchat:pa,dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});saveLocal();render();
+      toast(pa>0?'Équipement ajouté':'Équipement ajouté — pensez à renseigner le prix d’achat');},
+    updEquip(){const x=db.equipements.find(v=>v.id===id);if(!x)return;Object.assign(x,{nom:d.nom,prixAchat:numFR(d.prixAchat),dureeMois:+d.dureeMois||36,usagesMois:+d.usagesMois||1});
       state.editEquip=null;saveLocal();render();toast('Équipement modifié');},
     updProduit(){const x=db.produits.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,marque:d.marque||'',prix:+d.prix||0});state.editProduit=null;saveLocal();render();toast('Produit modifié');},
     addProduit(){db.produits.push({id:uid('p'),designation:d.designation,marque:d.marque||'',prix:+d.prix||0});saveLocal();render();},

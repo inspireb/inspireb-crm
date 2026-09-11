@@ -228,7 +228,9 @@ function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:
     if(!Array.isArray(s.equipementIds))s.equipementIds=s.equipementId?[s.equipementId]:[];
     s.equipementIds=s.equipementIds.filter(eid=>db.equipements.some(e=>e.id===eid));
     delete s.equipementId;});
-  db.cartes.forEach(cc=>{if(!Array.isArray(cc.relances))cc.relances=[];});}
+  db.cartes.forEach(cc=>{if(!Array.isArray(cc.relances))cc.relances=[];});
+  db.repEnAttente=db.repEnAttente||[];
+  db.clients.forEach(c=>{c.rep=c.rep||{};c.repAutre=c.repAutre||{};});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
 let dirty=false;function setDirty(d){dirty=d;const b=$('#syncBadge');if(b)b.style.display=d&&ghOK()?'inline-block':'none';updateSyncBtn();}
 function updateSyncBtn(){const b=$('#syncBtn');if(!b)return;if(!ghOK()){b.style.display='none';return;}
@@ -493,7 +495,7 @@ function viewClientDetail(){
   const tabs=['infos','seances','ventes','fiches','questionnaire','ateliers','cartes','factures'];
   const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
   const nav=`<div class="tabs">${tabs.map(t=>`<button data-act="tab" data-tab="${t}" class="${state.tab===t?'on':''}">${tl[t]}</button>`).join('')}</div>`;
-  return head+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
+  return head+bandeauAlertes(c)+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
 }
 function tabInfos(c){
   const r=resumeClient(c);
@@ -617,13 +619,6 @@ function ficheEditor(f){
   <div class="row" style="margin-top:14px"><button class="btn">Enregistrer</button>
   <button type="button" class="btn soft" data-act="printFiche" data-id="${f.id}">Imprimer / PDF</button></div>
   ${f.type==='conseils'?'<p class="hint" style="margin-top:10px">Rappel : ces conseils relèvent du bien-être et ne se substituent pas à un avis, diagnostic ou traitement médical — la mention figure automatiquement sur la fiche imprimée.</p>':''}</form>`;
-}
-function tabQuest(c){
-  const q=c.questionnaire||[];
-  return`<div class="card"><h2>Questionnaire d’accueil</h2>
-  ${q.length?`<p class="hint" style="margin-bottom:10px">Réponses importées le ${fdate(c.questionnaireDate)}.</p>
-  <table><tbody>${q.map(x=>`<tr><td style="width:45%;font-weight:600">${esc(x.q)}</td><td>${esc(x.r)}</td></tr>`).join('')}</tbody></table>`
-  :'<p class="hint">Aucune réponse rattachée. Importez le CSV du questionnaire (Google Forms ou Tally) depuis l’onglet Imports : le rapprochement se fait automatiquement par email.</p>'}</div>`;
 }
 function tabFactures(c){
   const list=db.factures.filter(f=>f.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -1003,7 +998,7 @@ function viewImports(){
   <div class="card"><h2>4 · Abonnées MailerLite (.csv)</h2>
   <p class="hint" style="margin-bottom:8px">MailerLite → Subscribers → Export CSV (toutes les abonnées, actives et désabonnées si possible). Met à jour le statut newsletter, la date d’inscription et les groupes sur chaque fiche.</p>
   <div class="dropzone"><input type="file" accept=".csv" data-act="fileML"></div></div>
-  <div id="importLog"></div>`;
+  <div id="importLog"></div>${viewEnAttente()}`;
 }
 function logImport(html){const l=$('#importLog');if(l)l.innerHTML=`<div class="card"><h2>Résultat</h2>${html}</div>`;}
 function headerIndex(head,names){const h=head.map(x=>norm(x));for(const n of names){const i=h.findIndex(x=>x.includes(norm(n)));if(i>=0)return i;}return -1;}
@@ -1077,21 +1072,6 @@ function enrichirFiche(c,head,r,iE){let maj=0;
     else if(/naissance|anniversaire/.test(nq)){const dt=parseFRDate(val);if(dt)set('naissance',dt);}
     else if(/consent|accepte|rgpd/.test(nq)&&/oui|accepte|d'accord|yes|✓|x/i.test(norm(val))){if(!c.consentement){c.consentement=true;c.consentementDate=today();maj++;}}});
   return maj;}
-async function importForms(file){
-  const rows=parseCSV(await file.text());if(rows.length<2)return toast('Fichier vide',true);
-  const head=rows[0];
-  const iE=head.findIndex(h=>/mail/i.test(h));
-  if(iE<0)return toast('Aucune colonne email détectée dans le formulaire',true);
-  let lies=0,orphelins=0,champsMaj=0;
-  rows.slice(1).forEach(r=>{
-    const email=(r[iE]||'').trim();if(!email)return;
-    const c=C.byEmail(email);
-    if(!c){orphelins++;return;}
-    c.questionnaire=head.map((q,i)=>({q,r:r[i]||'',i})).filter(x=>!isMetaCol(head[x.i],x.i)&&x.i!==iE&&x.r.trim()!=='').map(({q,r})=>({q,r}));
-    c.questionnaireDate=today();lies++;champsMaj+=enrichirFiche(c,head,r,iE);
-  });
-  saveLocal();render();logImport(`<p>${lies} questionnaire(s) rattaché(s) · ${champsMaj} champ(s) de fiche complété(s) automatiquement (adresse, naissance, téléphone…) · ${orphelins} réponse(s) sans fiche cliente correspondante (créez la cliente puis ré-importez).</p>`);toast('Questionnaires importés');
-}
 async function importML(file){
   let txt=await file.text();
   if(txt.charCodeAt(0)===0xFEFF)txt=txt.slice(1);
@@ -1119,6 +1099,239 @@ async function importML(file){
   logImport(diag+`<p><b>${maj}</b> fiche(s) mise(s) à jour avec le statut newsletter.</p>`+liste);
   toast(maj?`${maj} statut(s) newsletter importé(s)`:'Aucune correspondance trouvée — voir le détail',!maj);
 }
+
+const QBLOCS=[
+  {k:"prestations",t:"💎 Prestations réservées",cond:""},
+  {k:"moment",t:"🌿 Vous, en ce moment",cond:""},
+  {k:"visage",t:"🧖‍♀️ Votre peau (visage)",cond:"presta:Un soin visage"},
+  {k:"massage",t:"💆‍♀️ Votre massage",cond:"presta:Un massage bien-être"},
+  {k:"reflexo",t:"🦶 Votre réflexologie",cond:"presta:Une séance de réflexologie plantaire"},
+  {k:"naturo",t:"🌱 Votre naturopathie",cond:"presta:Une consultation naturopathie"},
+  {k:"maquillage",t:"💄 Votre mise en beauté",cond:"presta:Une mise en beauté (maquillage)"},
+  {k:"sante",t:"🩺 Votre santé",cond:""},
+  {k:"circulation",t:"🩺 Circulation et articulations",cond:"presta:Un massage bien-être|Une séance de réflexologie plantaire"},
+  {k:"grossesse",t:"🤰 Grossesse",cond:"sante:Grossesse ou allaitement"},
+  {k:"bonus",t:"🔬 Un petit bonus",cond:""},
+  {k:"consentement",t:"✔️ Consentements",cond:""},
+];
+const QUEST=[
+  {id:"quelle_prestation_s_avez_vous_reserve__10",bloc:"prestations",q:"Quelle prestation.s avez-vous réservé.e.s?",type:"multi",o:["Un soin visage", "Un massage bien-être", "Une séance de réflexologie plantaire", "Une consultation naturopathie", "Une mise en beauté (maquillage)", "Je ne sais pas encore/ on en parlera ensemble"]},
+  {id:"comment_est_votre_niveau_de_bien_etre__17",bloc:"moment",q:"Comment est votre niveau de bien-être global ?",type:"echelle",o:["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]},
+  {id:"quels_sont_vos_besoins_du_moment_18",bloc:"moment",q:"Quels sont vos besoins du moment ?",type:"multi",o:["Rééquilibrer et soutenir mes émotions", "Retrouver de l'énergie", "Gérer mon stress, me sentir plus détendue", "Me reconnecter à ma féminité", "Prendre du temps pour moi", "Prendre soin de ma peau, retrouver mon éclat naturel", "Améliorer mon sommeil", "Harmonisation du corps et de l'esprit", "Prendre soin de mon corps : plus de fermeté, une silhouette mieux dessinée", "Des jambes plus légères, meilleure circulation", "Moins de douleurs ou de tensions", "Aide à la récupération au niveau du sport (courbatures, douleurs, amélioration des performances)", "Equilibre hormonal", "Trouble digestif", "Autre"]},
+  {id:"comment_decririez_vous_votre_quotidien_34",bloc:"moment",q:"Comment décririez-vous votre quotidien ?",type:"select",o:["Un rythme un peu trop effréné", "Tourbillon de travail et d'enfants", "Zen et tranquille, j'ai réussi à trouver mon équilibre !", "Pas mal de boulot, mais je trouve du temps pour moi :)", "Autre"]},
+  {id:"comment_est_votre_sommeil_35",bloc:"moment",q:"Comment est votre sommeil ?",type:"select",o:["Très bon : je m'endors rapidement, je me réveille reposée et je me sens en forme au réveil", "Bon : Je m'endors assez facilement, je dors suffisamment, mais je pourrais parfois me réveiller un peu plus reposée", "Moyen : J'ai parfois des difficultés à m'endormir ou je me réveille durant la nuit, mais je me sens généralement reposée le matin", "Mauvais – J'ai souvent du mal à m'endormir ou à rester endormie, ce qui affecte ma journée", "Très mauvais – Je passe beaucoup de temps à me tourner et retourner dans mon lit, je me réveille fréquemment la nuit et me sens fatiguée au réveil", "Autre"]},
+  {id:"comment_est_votre_alimentation_36",bloc:"moment",q:"Comment est votre alimentation ?",type:"select",o:["Equilibrée (légumes, fruits, protéines...)", "Irrégulière (des fois équilibrée et des fois non)", "Pas équilibrée du tout", "Végan / Végétarien(ne)", "Problème digestif", "Autre"]},
+  {id:"pensez_vous_vous_hydrater_suffisamment_37",bloc:"moment",q:"Pensez-vous vous hydrater suffisamment?",type:"select",o:["Oui", "Je pourrais boire un peu plus :)", "Non, pas du tout"]},
+  {id:"pratiquez_vous_une_activite_physique_r_38",bloc:"moment",q:"Pratiquez-vous une activité physique régulière ?",type:"select",o:["Oui, tous les jours", "Oui, de temps en temps", "Quelques fois", "Très rarement", "Jamais"]},
+  {id:"comment_decririez_vous_la_relation_ent_39",bloc:"moment",q:"Comment décririez vous la relation entre votre corps et vos émotions ?",type:"select",o:["J'aime mon corps, il me manque juste du temps pour en prendre soin", "Je me sens souvent un peu déconnectée de mon corps", "C’est pas toujours l’amour fou, mais on essaie de s’entendre.", "Autre"]},
+  {id:"si_vous_pouviez_obtenir_un_resultat_mi_40",bloc:"moment",q:"Si vous pouviez obtenir un résultat « miracle », quelles seraient vos 3 priorités ?",type:"text",o:[]},
+  {id:"comment_decririez_vous_votre_peau_aujo_41",bloc:"visage",q:"Comment décririez-vous votre peau aujourd'hui ?",type:"select",o:["Grasse (Brillance visible, surtout sur la zone front, nez, menton et imperfections)", "Sèche (Sensation de tiraillement, surtout après le nettoyage, peau rugueuse, non confortable)", "Mixte (Brillance sur la zone front, nez, menton et joues sèches à normales)", "Sensible/ Réactive (Rougeurs, picotements, échauffements et sensation d'inconfort)", "Normale (douce, souple, confortable)", "Autre"]},
+  {id:"est_ce_que_vous_avez_deja_une_routine__42",bloc:"visage",q:"Est-ce que vous avez déjà une routine beauté ?",type:"select",o:["Oui, je suis une fidèle utilisatrice de produits de beauté.", "Un peu, mais j’aimerais optimiser ma routine.", "Non, je n’ai pas encore trouvé la routine qui me convient.", "Autre"]},
+  {id:"avez_vous_des_preoccupations_particuli_43",bloc:"visage",q:"Avez-vous des préoccupations particulières au niveau de votre peau du visage ?",type:"multi",o:["Manque d'éclat, teint terne", "Rides / Ridules", "Imperfections - boutons", "Déshydratation", "Acné", "Rougeurs - sensibilité", "Perte d'élasticité", "Tâches pigmentaires", "Ezcéma, psoriasis", "Points noirs", "Pores dilatés", "Rosacée/couperose", "Cicatrice de marque d'acné ou autres", "Excès de sébum / peau qui brille", "Autre"]},
+  {id:"qu_utilisez_vous_comme_produits_actuel_59",bloc:"visage",q:"Qu'utilisez-vous comme produits actuellement ?",type:"text",o:[]},
+  {id:"votre_routine_actuelle_vous_apporte_t__60",bloc:"visage",q:"Votre routine actuelle vous apporte-t-elle des résultats satisfaisants ?",type:"select",o:["Oui totalement", "Je l'aime bien, mais j'aimerai encore améliorer certaines choses", "Non, pas du tout", "Autre"]},
+  {id:"qu_est_ce_qui_compte_le_plus_pour_vous_61",bloc:"visage",q:"Qu'est-ce qui compte le plus pour vous dans le choix d’un soin ou d’un produit ?",type:"multi",o:["L'efficacité visible rapidement", "La composition respectueuse", "Le plaisir sensoriel", "Les conseils personnalisés et adaptés", "Autre"]},
+  {id:"y_a_t_il_des_zones_de_massage_a_privil_67",bloc:"massage",q:"Y a-t-il des zones de massage à privilégier ?",type:"multi",o:["Dos", "Nuque/épaules", "Jambes/ pieds", "Ventre", "Visage/crâne", "Mains/ bras", "Autre"]},
+  {id:"quel_niveau_de_pression_desirez_vous_75",bloc:"massage",q:"Quel niveau de pression désirez-vous ?",type:"select",o:["Légère, vraiment des enveloppements", "Moyenne, alterner enveloppements et pressions", "Forte", "Autre"]},
+  {id:"des_zones_a_eviter_ou_sensibles_si_oui_76",bloc:"massage",q:"Des zones à éviter ou sensibles ? Si oui, le(s)quel(s)?",type:"text",o:[]},
+  {id:"sur_quel_s_plan_s_souhaitez_vous_etre__77",bloc:"reflexo",q:"Sur quel(s) plan(s) souhaitez-vous être accompagnée en priorité ?",type:"multi",o:["Stress et émotions", "Sommeil", "Digestion", "Circulation / jambes lourdes", "Équilibre hormonal", "Douleurs et tensions", "Fatigue générale", "Autre"]},
+  {id:"avez_vous_des_tensions_ou_douleurs_loc_86",bloc:"reflexo",q:"Avez-vous des tensions ou douleurs localisées ? Si oui, où ?",type:"text",o:[]},
+  {id:"vos_pieds_y_a_t_il_quelque_chose_a_me__87",bloc:"reflexo",q:"Vos pieds : y a-t-il quelque chose à me signaler ?",type:"multi",o:["Mycose ou ongle abîmé", "Verrue plantaire", "Plaie ou blessure récente", "Entorse ou fracture récente", "Œdème / gonflement", "Rien de particulier", "Autre"]},
+  {id:"etes_vous_tres_chatouilleuse_95",bloc:"reflexo",q:"Êtes-vous très chatouilleuse ?",type:"select",o:["Oui beaucoup", "Un peu", "Pas du tout"]},
+  {id:"quel_est_votre_objectif_principal_avec_96",bloc:"naturo",q:"Quel est votre objectif principal avec cet accompagnement ?",type:"text",o:[]},
+  {id:"comment_est_votre_niveau_d_energie_au__97",bloc:"naturo",q:"Comment est votre niveau d'énergie au fil de la journée ?",type:"select",o:["Bonne toute la journée", "Coup de barre en début d'après-midi", "Fatiguée dès le réveil", "En dents de scie", "Épuisée en permanence"]},
+  {id:"prenez_vous_actuellement_des_complemen_98",bloc:"naturo",q:"Prenez-vous actuellement des compléments alimentaires ? Lesquels ?",type:"text",o:[]},
+  {id:"y_a_t_il_des_antecedents_de_sante_impo_99",bloc:"naturo",q:"Y a-t-il des antécédents de santé importants dans votre histoire ?",type:"text",o:[]},
+  {id:"avez_vous_deja_ete_accompagnee_en_natu_100",bloc:"naturo",q:"Avez-vous déjà été accompagnée en naturopathie ou médecine douce ?",type:"select",o:["Oui", "Non"]},
+  {id:"pour_quelle_occasion_101",bloc:"maquillage",q:"Pour quelle occasion ?",type:"select",o:["Séance photo boudoir", "Séance photo (autre)", "Mariage", "Événement ou soirée", "Simplement pour moi", "Autre"]},
+  {id:"comment_decririez_vous_votre_peau_aujo_102",bloc:"maquillage",q:"Comment décririez vous votre peau aujourd'hui ?",type:"select",o:["Sèche", "Normale", "Mixte", "Grasse", "Je ne sais pas"]},
+  {id:"avez_vous_des_zones_que_vous_aimeriez__103",bloc:"maquillage",q:"Avez-vous des zones que vous aimeriez que l'on estompe ?",type:"multi",o:["Cernes", "Rougeurs", "Imperfections", "Ridules", "Tâches pigmentaires", "Rien de particulier", "Autre"]},
+  {id:"vous_maquillez_vous_au_quotidien_111",bloc:"maquillage",q:"Vous maquillez vous au quotidien ?",type:"select",o:["Oui, tous les jours", "De temps en temps", "Très rarement", "Jamais, ce sera une première"]},
+  {id:"quel_resultat_souhaitez_vous_112",bloc:"maquillage",q:"Quel résultat souhaitez vous ?",type:"select",o:["Très naturel, presque invisible — juste ma peau en mieux", "Naturel lumineux, un joli teint et un regard souligné", "Un peu plus marqué, avec un regard intense ou une bouche affirmée", "Je vous fais confiance, surprenez-moi", "Autre"]},
+  {id:"y_a_t_il_un_trait_de_votre_visage_que__113",bloc:"maquillage",q:"Y a-t-il un trait de votre visage que vous aimeriez mettre en valeur ?",type:"text",o:[]},
+  {id:"y_a_t_il_quelque_chose_que_vous_n_aime_114",bloc:"maquillage",q:"Y a-t-il quelque chose que vous n'aimez pas du tout en maquillage ?",type:"text",o:[]},
+  {id:"quelles_seront_les_couleurs_de_votre_t_115",bloc:"maquillage",q:"Quelles seront les couleurs de votre tenue ?",type:"text",o:[]},
+  {id:"portez_vous_des_lentilles_de_contact_o_116",bloc:"maquillage",q:"Portez vous des lentilles de contact ou des extensions de cils ?",type:"select",o:["Lentilles de contact", "Extensions de cils", "Les deux", "Ni l'un ni l'autre"]},
+  {id:"avez_vous_des_sensibilites_connues_aux_117",bloc:"maquillage",q:"Avez-vous des sensibilités connues aux produits de maquillage ? Si oui, lesquelles ?",type:"text",o:[]},
+  {id:"le_lieu_de_la_prestation_118",bloc:"maquillage",q:"Le lieu de la prestation",type:"text",o:[]},
+  {id:"important_avez_vous_ou_et_faites_vous_119",bloc:"sante",q:"Important, avez-vous ou/et faites-vous :",type:"multi",o:["Grossesse ou allaitement", "Cancer en cours de traitement ou zone affectée par une tumeur", "Traitement par radiothérapie", "Problème ou traitement cardiaque", "Port de pacemaker ou dispositif électronique implanté", "Implant métallique", "Crises d'épilepsie", "Paie ouverte, peau lésée ou inflammée", "Diabète ou trouble endocrinien", "Maladie rénale ou hépatique", "Pathologie dermatologique active au niveau du visage (psoriasis, eczéma, infections...)", "Prise d'extrait de pépins de pamplemousse", "Utilisation d'Huiles essentielles interne ou externe", "Aucun problème de santé ou de contre-indication", "Autre"]},
+  {id:"concernant_votre_circulation_et_vos_ar_135",bloc:"circulation",q:"Concernant votre circulation et vos articulations :",type:"multi",o:["Phlébite ou antécédent de phlébite", "Thrombose", "Varices", "Opération récente (moins de 3 mois)", "Fragilité osseuse / ostéoporose", "Rien de tout cela"]},
+  {id:"traitements_en_cours_142",bloc:"sante",q:"Traitements en cours",type:"multi",o:["Anti-coagulants", "Antibiotiques", "Oméga 3", "Zinc", "Magnésium", "Eau d'argile", "Levotyrox", "Extrait de pépins de pamplemousse", "Huiles essentielles (interne ou externe)", "Médicaments (corticoïdes, stéroïdes, rétinoïdes)", "Traitement photosensibilisant", "Aucun", "Autre"]},
+  {id:"souffrez_vous_d_un_autre_probleme_de_s_156",bloc:"sante",q:"Souffrez vous d'un autre problème de santé à me signaler ?",type:"text",o:[]},
+  {id:"avez_vous_des_allergies_ou_sensibilite_157",bloc:"sante",q:"Avez-vous des allergies ou sensibilités à des produits/ingrédients ? Si oui, lesquelles ?",type:"text",o:[]},
+  {id:"grossesse_158",bloc:"grossesse",q:"Grossesse",type:"select",o:["1er trimestre", "2e trimestre", "3e trimestre", "Allaitement"]},
+  {id:"comment_m_avez_vous_decouverte_159",bloc:"bonus",q:"Comment m'avez-vous découverte ?",type:"select",o:["Facebook", "Instagram", "E-mail", "Téléphone ou WhatsApp", "LinkedIn", "Recherche sur internet", "Bouche-à-oreille", "Autre"]},
+  {id:"avez_vous_envie_de_m_indiquer_autre_ch_160",bloc:"bonus",q:"Avez-vous envie de m'indiquer autre chose ? Une intention, une attente, une émotion du moment ?",type:"text",o:[]},
+  {id:"consentements_161",bloc:"consentement",q:"Consentements",type:"multi",o:["J'accepte que mes informations soient utilisées par InspireB dans le cadre de la préparation et de la réalisation de ma prestation.", "Je certifie avoir communiqué toute information utile concernant mes allergies, sensibilités ou éléments pouvant avoir une incidence sur la prestation.", "Je m'engage à informer InspireB de tout changement de mon état de santé ou de toute réaction cutanée avant le rendez-vous.", "Je souhaite recevoir les actualités d'InspireB (site web, articles blog, ateliers, offres...)"]},
+];
+const QALERTES=["Grossesse ou allaitement", "Cancer en cours de traitement ou zone affectée par une tumeur", "Traitement par radiothérapie", "Crises d'épilepsie", "Implant métallique", "Problème ou traitement cardiaque", "Port de pacemaker ou dispositif électronique implanté", "Paie ouverte, peau lésée ou inflammée", "Diabète ou trouble endocrinien", "Maladie rénale ou hépatique", "Pathologie dermatologique active au niveau du visage (psoriasis, eczéma, infections...)", "Phlébite ou antécédent de phlébite", "Thrombose", "Opération récente (moins de 3 mois)", "Fragilité osseuse / ostéoporose", "Anti-coagulants"];
+
+/* ═════════ QUESTIONNAIRE STRUCTURÉ ═════════ */
+function qVal(c,id){const r=(c.rep||{})[id];return r===undefined?'':r;}
+function qAutre(c,id){return (c.repAutre||{})[id]||'';}
+function qPrestas(c){const q=QUEST.find(x=>x.bloc==='prestations');const v=qVal(c,q.id);return Array.isArray(v)?v:(v?[v]:[]);}
+function qSante(c){const q=QUEST.find(x=>x.bloc==='sante'&&x.type==='multi');if(!q)return[];const v=qVal(c,q.id);return Array.isArray(v)?v:[];}
+function blocVisible(c,b){
+  if(!b.cond)return true;
+  const[kind,val]=b.cond.split(':');const attendus=val.split('|');
+  const src=kind==='presta'?qPrestas(c):qSante(c);
+  return attendus.some(a=>src.includes(a));}
+function qRepondu(c){return Object.keys(c.rep||{}).length>0;}
+function alertesClient(c){
+  const out=[];
+  QUEST.filter(q=>q.type==='multi').forEach(q=>{const v=qVal(c,q.id);
+    if(Array.isArray(v))v.forEach(x=>{if(QALERTES.includes(x)&&!out.includes(x))out.push(x);});});
+  return out;}
+function bandeauAlertes(c){
+  const a=alertesClient(c);if(!a.length)return'';
+  return`<div class="card" style="border-left:4px solid #c0392b;background:#fdf3f2">
+  <h2 style="color:#c0392b">⚠ Points de vigilance déclarés</h2>
+  <p>${a.map(x=>`<span class="badge err">${esc(x)}</span>`).join(' ')}</p>
+  <p class="hint">Déclarés par la cliente dans le questionnaire. À vérifier oralement avant la séance.</p></div>`;}
+
+function champQ(c,q){
+  const n='q_'+q.id, v=qVal(c,q.id), autre=qAutre(c,q.id);
+  const aOption=(q.o||[]).some(o=>/^autre$/i.test(o));
+  const champAutre=aOption?`<input name="qa_${q.id}" value="${esc(autre)}" placeholder="Précisez (Autre)…" style="margin-top:6px">`:'';
+  if(q.type==='multi'){
+    const arr=Array.isArray(v)?v:[];
+    return`<div class="row" style="flex-wrap:wrap;gap:4px 14px">${q.o.map(o=>
+      `<label class="check" style="min-width:210px"><input type="checkbox" name="${n}" value="${esc(o)}" ${arr.includes(o)?'checked':''}> ${esc(o)}</label>`).join('')}</div>${champAutre}`;}
+  if(q.type==='echelle'){
+    return`<div class="row" style="gap:3px;flex-wrap:wrap">${q.o.map(o=>
+      `<label class="check" style="min-width:auto"><input type="radio" name="${n}" value="${o}" ${String(v)===o?'checked':''}> ${o}</label>`).join('')}</div>`;}
+  if(q.type==='select'){
+    const connu=q.o.includes(v);
+    return`<select name="${n}"><option value="">—</option>${q.o.map(o=>
+      `<option value="${esc(o)}" ${v===o?'selected':''}>${esc(o)}</option>`).join('')}
+      ${!connu&&v?`<option value="${esc(v)}" selected>${esc(v)} (réponse libre)</option>`:''}</select>${champAutre}`;}
+  if(q.type==='date')return`<input type="date" name="${n}" value="${esc(v)}">`;
+  return`<textarea name="${n}" rows="2">${esc(v)}</textarea>`;}
+
+function tabQuest(c){
+  const maj=c.repDate?`Dernière mise à jour le ${fdate(c.repDate)}${c.repSource?' · '+esc(c.repSource):''}.`:'Jamais rempli.';
+  const blocs=QBLOCS.map(b=>{
+    const visible=blocVisible(c,b);
+    const qs=QUEST.filter(q=>q.bloc===b.k);
+    if(!qs.length)return'';
+    if(!visible)return`<div class="card" style="opacity:.5"><h2 style="font-size:15px">${b.t}</h2>
+      <p class="hint">Bloc masqué : ne s’applique pas aux prestations sélectionnées.</p></div>`;
+    return`<div class="card"><h2 style="font-size:16px">${b.t}</h2>
+    ${qs.map(q=>`<div style="margin-bottom:14px"><label style="font-weight:600">${esc(q.q)}</label>${champQ(c,q)}</div>`).join('')}</div>`;}).join('');
+  const legacy=(c.questionnaire||[]).length?`<div class="card"><h2>Ancien import (format brut)</h2>
+    <table><tbody>${c.questionnaire.map(x=>`<tr><td style="width:45%;font-weight:600">${esc(x.q)}</td><td>${esc(x.r)}</td></tr>`).join('')}</tbody></table>
+    <p class="hint" style="margin-top:8px">Conservé pour mémoire. Recopiez ce qui vous sert dans les champs ci-dessus, puis ce bloc pourra être supprimé.</p>
+    <button type="button" class="btn sm danger" data-act="delLegacyQuest" data-id="${c.id}" style="margin-top:8px">Supprimer l’ancien import</button></div>`:'';
+  return`<div class="card"><div class="row" style="justify-content:space-between">
+    <div><h2>Questionnaire d’accueil</h2><p class="hint">${maj} Complétez ou corrigez librement pendant l’entretien.</p></div>
+    <button class="btn" form="formQuest">Enregistrer le questionnaire</button></div></div>
+  ${bandeauAlertes(c)}
+  <form id="formQuest" data-form="saveQuest" data-id="${c.id}">${blocs}
+  <div class="card"><div class="row"><button class="btn">Enregistrer le questionnaire</button>
+  <span class="hint">Les blocs conditionnels apparaissent selon les prestations cochées — enregistrez pour les faire apparaître.</span></div></div></form>
+  ${legacy}`;}
+
+/* ═════════ IMPORT TALLY STRUCTURÉ ═════════ */
+function mapColonnes(head){
+  const parOpt={},parQ={};
+  head.forEach((h,i)=>{
+    const t=(h||'').trim();
+    const m=t.match(/^(.*?) \((.*)\)$/);
+    const q=QUEST.find(x=>x.q===t);
+    if(q){parQ[q.id]=i;return;}
+    if(m){const q2=QUEST.find(x=>x.q===m[1]);
+      if(q2){(parOpt[q2.id]=parOpt[q2.id]||{})[m[2]]=i;}}});
+  return{parQ,parOpt};}
+function lireReponse(q,r,parQ,parOpt){
+  const opts=parOpt[q.id];
+  if(q.type==='multi'&&opts){
+    const coches=Object.entries(opts).filter(([o,i])=>/^true$/i.test((r[i]||'').trim())).map(([o])=>o);
+    if(!coches.length&&parQ[q.id]!==undefined&&!(r[parQ[q.id]]||'').trim())return undefined;
+    return coches;}
+  const i=parQ[q.id];if(i===undefined)return undefined;
+  const v=(r[i]||'').trim();return v===''?undefined:v;}
+function texteAutre(q,r,parQ,parOpt){
+  if(q.type!=='multi'||parQ[q.id]===undefined)return'';
+  const resume=(r[parQ[q.id]]||'').trim();if(!resume)return'';
+  const connus=(q.o||[]);
+  const restes=resume.split(', ').filter(x=>!connus.includes(x.trim()));
+  return restes.join(', ');}
+
+async function importForms(file){
+  let txt=await file.text();if(txt.charCodeAt(0)===0xFEFF)txt=txt.slice(1);
+  const rows=parseCSV(txt);if(rows.length<2)return toast('Fichier vide',true);
+  const head=rows[0].map(x=>(x||'').trim());
+  const iE=head.findIndex(h=>/^e-?mail$/i.test(h))>=0?head.findIndex(h=>/^e-?mail$/i.test(h)):head.findIndex(h=>/mail/i.test(h));
+  const iNom=head.findIndex(h=>/appelez-vous|nom\s*&|^nom$/i.test(h));
+  const iTel=head.findIndex(h=>/t[ée]l[ée]phone|joindre/i.test(h));
+  const iNaiss=head.findIndex(h=>/naissance/i.test(h));
+  const iAdr=head.findIndex(h=>/adresse postale/i.test(h));
+  const iDate=head.findIndex(h=>/submitted|soumis/i.test(h));
+  const iClient=head.findIndex(h=>/^client(id)?$/i.test(h));
+  const{parQ,parOpt}=mapColonnes(head);
+  const reconnues=Object.keys(parQ).length+Object.keys(parOpt).length;
+  if(iE<0)return toast('Aucune colonne email détectée',true);
+  let lies=0,champsMaj=0;db.repEnAttente=db.repEnAttente||[];
+  rows.slice(1).forEach(r=>{
+    const email=(r[iE]||'').trim();
+    const nom=iNom>=0?(r[iNom]||'').trim():'';
+    const tel=iTel>=0?telFR(r[iTel]):'';
+    let c=null;
+    if(iClient>=0&&(r[iClient]||'').trim())c=C.get((r[iClient]||'').trim());
+    if(!c&&email)c=C.byEmail(email);
+    if(!c&&nom)c=C.byName(nom);
+    if(!c&&tel)c=db.clients.find(x=>x.tel&&telFR(x.tel)===tel)||null;
+    const rep={},repA={};
+    QUEST.forEach(q=>{const v=lireReponse(q,r,parQ,parOpt);if(v!==undefined&&!(Array.isArray(v)&&!v.length))rep[q.id]=v;
+      const a=texteAutre(q,r,parQ,parOpt);if(a)repA[q.id]=a;});
+    const brut={email,nom,tel,naissance:iNaiss>=0?(r[iNaiss]||'').trim():'',adresse:iAdr>=0?(r[iAdr]||'').trim():'',
+      soumis:iDate>=0?(r[iDate]||'').slice(0,10):today(),rep,repA};
+    if(!c){if(!db.repEnAttente.some(x=>x.email===email&&x.soumis===brut.soumis))db.repEnAttente.push(brut);return;}
+    appliquerReponses(c,brut);lies++;champsMaj+=completerFiche(c,brut);
+  });
+  saveLocal();render();
+  const att=db.repEnAttente.length;
+  logImport(`<p><b>${reconnues}</b> colonne(s) reconnue(s) sur ${head.length}.</p>
+  <p><b>${lies}</b> questionnaire(s) rattaché(s) · <b>${champsMaj}</b> champ(s) de fiche complété(s) · <b>${att}</b> réponse(s) en attente de rattachement.</p>
+  ${att?'<p class="hint">Les réponses non rattachées sont listées plus bas : choisissez la cliente, ou créez-la.</p>':''}`);
+  toast(lies?`${lies} questionnaire(s) rattaché(s)`:'Aucun rattachement automatique — voir les réponses en attente');}
+
+function appliquerReponses(c,b){
+  c.rep=Object.assign({},c.rep||{},b.rep);
+  c.repAutre=Object.assign({},c.repAutre||{},b.repA);
+  c.repDate=b.soumis||today();c.repSource='questionnaire Tally';
+  const cons=QUEST.find(q=>q.bloc==='consentement');
+  if(cons&&Array.isArray(c.rep[cons.id])){
+    const v=c.rep[cons.id];
+    if(v.some(x=>/informations soient utilis/i.test(x))&&!c.consentement){c.consentement=true;c.consentementDate=b.soumis||today();}
+    const nl=v.some(x=>/actualit[ée]s d'?InspireB|recevoir les actualit/i.test(x));
+    c.newsletter={abonnee:nl,statut:nl?'Abonnée (questionnaire)':'Non demandée (questionnaire)',
+      date:nl?(b.soumis||today()):'',groupes:(c.newsletter&&c.newsletter.groupes)||''};}}
+
+function completerFiche(c,b){let maj=0;const set=(k,v)=>{if(v&&!c[k]){c[k]=v;maj++;}};
+  if(b.nom&&!c.prenom&&!c.nom){const{prenom,nom}=splitName(b.nom);c.prenom=prenom;c.nom=nom;maj++;}
+  set('email',b.email);set('tel',telFR(b.tel));set('naissance',b.naissance);set('adresse',b.adresse);
+  return maj;}
+
+function viewEnAttente(){
+  const att=db.repEnAttente||[];if(!att.length)return'';
+  return`<div class="card"><h2>Réponses en attente de rattachement (${att.length})</h2>
+  <p class="hint" style="margin-bottom:10px">Aucune fiche ne correspondait à l’email, au nom ni au téléphone. Choisissez la cliente, ou créez-la à partir de la réponse.</p>
+  <table><thead><tr><th>Reçue le</th><th>Nom déclaré</th><th>Email</th><th>Rattacher à</th><th></th></tr></thead><tbody>
+  ${att.map((b,i)=>{
+    const sugg=db.clients.map(c=>{let sc=0;
+      if(b.tel&&c.tel&&telFR(c.tel)===telFR(b.tel))sc+=3;
+      if(b.naissance&&c.naissance===b.naissance)sc+=2;
+      if(b.nom&&norm(C.name(c))===norm(b.nom))sc+=3;
+      return{c,sc};}).filter(x=>x.sc>=2).sort((a,b2)=>b2.sc-a.sc)[0];
+    return`<tr><td>${fdate(b.soumis)}</td><td>${esc(b.nom||'—')}</td><td>${esc(b.email||'—')}</td>
+    <td><form class="row" data-form="rattacher" data-i="${i}">
+      ${selClients('name="clientId"',sugg?sugg.c.id:'')}
+      <button class="btn sm">Rattacher</button></form>
+      ${sugg?`<span class="hint">Correspondance probable : ${esc(C.name(sugg.c))}</span>`:''}</td>
+    <td class="row"><button class="btn sm soft" data-act="creerDepuisRep" data-i="${i}">+ Créer la fiche</button>
+      <button class="btn sm danger" data-act="delRep" data-i="${i}">✕</button></td></tr>`;}).join('')}
+  </tbody></table></div>`;}
 
 /* ═════════ RÉGLAGES ═════════ */
 function viewParams(){
@@ -1202,6 +1415,16 @@ document.addEventListener('click',async(e)=>{
   const A={
     newClient(){const c=C.add({});saveLocal();state.clientId=c.id;state.tab='infos';render();},
     openClient(){state.view='clients';state.clientId=id;state.tab='infos';state.ficheEdit=null;render();},
+    creerDepuisRep(){const i=+el.dataset.i;const b=(db.repEnAttente||[])[i];if(!b)return;
+      const{prenom,nom}=splitName(b.nom||'');
+      const c=C.add({prenom,nom,email:b.email||'',tel:telFR(b.tel||''),naissance:b.naissance||'',adresse:b.adresse||''});
+      appliquerReponses(c,b);db.repEnAttente.splice(i,1);saveLocal();
+      state.view='clients';state.clientId=c.id;state.tab='questionnaire';render();toast('Fiche créée depuis la réponse');},
+    delRep(){const i=+el.dataset.i;if(!confirm('Supprimer définitivement cette réponse en attente ?'))return;
+      db.repEnAttente.splice(i,1);saveLocal();render();},
+    delLegacyQuest(){const c=C.get(id);if(!c)return;
+      if(!confirm('Supprimer l’ancien import brut ? Les champs structurés ne sont pas touchés.'))return;
+      delete c.questionnaire;delete c.questionnaireDate;saveLocal();render();toast('Ancien import supprimé');},
     goAteliers(){state.view='ateliers';state.clientId=null;render();},
     goCartes(){state.view='cartes';state.clientId=null;render();},
     goCarte(){state.view='cartes';state.clientId=null;state.highlightCarte=id;render();
@@ -1297,6 +1520,19 @@ document.addEventListener('submit',(e)=>{
   const d=Object.fromEntries(FD.entries());const id=f.dataset.id;
   const getAll=(nm)=>FD.getAll(nm).filter(v=>v!=='');
   const F={
+    saveQuest(){const c=C.get(id);if(!c)return;
+      c.rep=c.rep||{};c.repAutre=c.repAutre||{};
+      QUEST.forEach(q=>{
+        const nm='q_'+q.id;
+        if(q.type==='multi'){const v=getAll(nm);if(v.length)c.rep[q.id]=v;else delete c.rep[q.id];}
+        else{const v=(d[nm]||'').trim();if(v)c.rep[q.id]=v;else delete c.rep[q.id];}
+        const a=(d['qa_'+q.id]||'').trim();if(a)c.repAutre[q.id]=a;else delete c.repAutre[q.id];});
+      c.repDate=today();c.repSource='saisie au cabinet';
+      saveLocal();render();toast('Questionnaire enregistré');},
+    rattacher(){const b=(db.repEnAttente||[])[+f.dataset.i];if(!b)return;
+      const c=C.get(d.clientId);if(!c)return toast('Choisissez une cliente',true);
+      appliquerReponses(c,b);completerFiche(c,b);
+      db.repEnAttente.splice(+f.dataset.i,1);saveLocal();render();toast('Réponses rattachées à '+C.name(c));},
     saveClient(){const c=C.get(id);Object.assign(c,{prenom:d.prenom,nom:d.nom,naissance:d.naissance,email:d.email,tel:d.tel,statut:d.statut,adresse:d.adresse,cp:d.cp,ville:d.ville,notes:d.notes,nuskin:!!d.nuskin,jolimoi:!!d.jolimoi});
       if(d.consentement&&!c.consentement)c.consentementDate=today();c.consentement=!!d.consentement;
       const prevNl=c.newsletter||{};

@@ -224,7 +224,11 @@ let db=structuredClone(DB_DEFAULT);
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch(e){return false;}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 function saveLocal(){db.settings.gh.token='';store.set('inspireb_db',JSON.stringify(db));setDirty(true);scheduleAuto();}
 function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:''};db.counters.carteE=db.counters.carteE||0;
-  db.equipements=db.equipements||[];db.soins.forEach(s=>{if(s.coutVariable===undefined)s.coutVariable=0;if(s.equipementId===undefined)s.equipementId='';});}
+  db.equipements=db.equipements||[];db.soins.forEach(s=>{if(s.coutVariable===undefined)s.coutVariable=0;
+    if(!Array.isArray(s.equipementIds))s.equipementIds=s.equipementId?[s.equipementId]:[];
+    s.equipementIds=s.equipementIds.filter(eid=>db.equipements.some(e=>e.id===eid));
+    delete s.equipementId;});
+  db.cartes.forEach(cc=>{if(!Array.isArray(cc.relances))cc.relances=[];});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
 let dirty=false;function setDirty(d){dirty=d;const b=$('#syncBadge');if(b)b.style.display=d&&ghOK()?'inline-block':'none';updateSyncBtn();}
 function updateSyncBtn(){const b=$('#syncBtn');if(!b)return;if(!ghOK()){b.style.display='none';return;}
@@ -357,9 +361,27 @@ function viewDash(){
     <div class="kpi"><div class="n">${seancesMois}</div><div class="l">Prestations ce mois-ci</div></div>
     <div class="kpi"><div class="n">${eur(soldes)}</div><div class="l">Cartes cadeaux en circulation</div></div>
   </div>
-  ${(()=>{const rdv=db.seances.filter(s=>s.prevu&&s.date>=today()).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,8);
-  return rdv.length?`<div class="card" style="margin-top:18px"><h2>📅 Prochains rendez-vous (import Setmore)</h2>
-  <table><tbody>${rdv.map(s=>`<tr><td>${fdate(s.date)}</td><td><span class="clickable" data-act="openClient" data-id="${s.clientId}">${esc(C.name(C.get(s.clientId)))}</span></td><td>${esc(s.designation)}</td><td style="text-align:right"><button class="btn sm soft" data-act="prepRdv" data-id="${s.clientId}">▶ Préparer</button></td></tr>`).join('')}</tbody></table></div>`:'';})()}
+  ${(()=>{const fin=new Date(Date.now()+7*864e5).toISOString().slice(0,10);
+  const sem=db.seances.filter(s=>s.prevu&&s.date>=today()&&s.date<=fin).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  if(!sem.length)return'';
+  const jour=(d)=>{const dt=new Date(d+'T00:00:00');return dt.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});};
+  return`<div class="card" style="margin-top:18px"><h2>📅 Rendez-vous des 7 prochains jours</h2>
+  <table><tbody>${sem.map(s=>`<tr><td style="white-space:nowrap">${jour(s.date)}</td>
+  <td><span class="clickable" data-act="openClient" data-id="${s.clientId}">${esc(C.name(C.get(s.clientId)))}</span></td>
+  <td>${esc(s.designation)}</td>
+  <td style="text-align:right"><button class="btn sm soft" data-act="prepRdv" data-id="${s.clientId}">▶ Préparer</button></td></tr>`).join('')}</tbody></table></div>`;})()}
+  ${(()=>{const rel=cartesARelancer();
+  return rel.length?`<div class="card" style="margin-top:18px"><h2>🎁 Cartes cadeaux à relancer</h2>
+  <p class="hint" style="margin-bottom:10px">Non utilisées depuis 6 mois ou plus — le délai repart à chaque relance notée.</p>
+  <table><thead><tr><th>N°</th><th>Bénéficiaire</th><th>Valeur</th><th>Sans nouvelle depuis</th><th></th></tr></thead><tbody>
+  ${rel.map(cc=>{const j=carteJoursDepuis(cc);const ach=cc.acheteuseId?C.get(cc.acheteuseId):null;
+    return`<tr><td style="font-weight:600">${esc(cc.num)}</td>
+    <td>${esc(cc.beneficiaire||'—')}${ach?` <span class="hint">(achat : ${esc(C.name(ach))})</span>`:''}</td>
+    <td>${+cc.montant>0?eur(carteSolde(cc)):esc(cc.soin||'Soin offert')}</td>
+    <td><span class="badge warn">${Math.floor(j/30)} mois</span>${(cc.relances||[]).length?` <span class="hint">${(cc.relances||[]).length} relance(s)</span>`:''}</td>
+    <td style="text-align:right"><button class="btn sm soft" data-act="goCarte" data-id="${cc.id}">Ouvrir</button>
+    <button class="btn sm" data-act="relanceCarte" data-id="${cc.id}">✓ Relancée</button></td></tr>`;}).join('')}
+  </tbody></table></div>`:'';})()}
   ${(()=>{const an=prochainsAnniv(30);return an.length?`<div class="card" style="margin-top:18px"><h2>🎂 Anniversaires dans les 30 jours</h2>
   <table><tbody>${an.map(a=>`<tr><td><span class="clickable" data-act="openClient" data-id="${a.c.id}">${esc(C.name(a.c))}</span></td>
   <td>${a.next.toLocaleDateString('fr-FR',{day:'numeric',month:'long'})}</td>
@@ -372,15 +394,47 @@ function viewDash(){
 }
 
 /* ═════════ CLIENTES ═════════ */
+function clientStats(c){
+  const dates=db.seances.filter(s=>s.clientId===c.id&&!s.prevu).map(s=>s.date).filter(Boolean).sort();
+  return{nb:dates.length,derniere:dates.length?dates[dates.length-1]:'',creation:c.createdAt||''};}
 function viewClients(){
   const q=norm(state.search);
+  const tri=state.cliSort||'nom', filtre=state.cliFiltre||'toutes';
   let list=db.clients.filter(c=>!q||norm(C.name(c)+' '+c.email+' '+c.tel).includes(q));
-  list.sort((a,b)=>C.name(a).localeCompare(C.name(b)));
-  return`<h1>Clientes</h1><p class="sub">${db.clients.length} fiche${db.clients.length>1?'s':''} au total</p>
+  const j90=new Date(Date.now()-90*864e5).toISOString().slice(0,10);
+  const j180=new Date(Date.now()-180*864e5).toISOString().slice(0,10);
+  const F={
+    toutes:()=>true,
+    actives:c=>c.statut!=='inactive',
+    recentes:c=>clientStats(c).derniere>=j90,
+    perdues:c=>{const st=clientStats(c);return st.nb>0&&st.derniere<j180;},
+    jamais:c=>clientStats(c).nb===0,
+    newsletter:c=>c.newsletter&&c.newsletter.abonnee,
+    rgpd:c=>!c.consentement,
+  };
+  list=list.filter(F[filtre]||F.toutes);
+  const S={
+    nom:(a,b)=>C.name(a).localeCompare(C.name(b)),
+    creation:(a,b)=>(clientStats(b).creation||'').localeCompare(clientStats(a).creation||''),
+    derniere:(a,b)=>(clientStats(b).derniere||'').localeCompare(clientStats(a).derniere||''),
+    venues:(a,b)=>clientStats(b).nb-clientStats(a).nb,
+  };
+  list.sort(S[tri]||S.nom);
+  const btnF=(k,lbl)=>`<button class="btn sm ${filtre===k?'':'ghost'}" data-act="clientFiltre" data-filtre="${k}">${lbl}</button>`;
+  const btnS=(k,lbl)=>`<button class="btn sm ${tri===k?'':'ghost'}" data-act="clientSort" data-sort="${k}">${lbl}</button>`;
+  return`<h1>Clientes</h1><p class="sub">${db.clients.length} fiche${db.clients.length>1?'s':''} au total · ${list.length} affichée${list.length>1?'s':''}</p>
   <div class="card"><div class="row">
     <input id="searchClient" placeholder="Rechercher par nom, email ou téléphone…" value="${esc(state.search)}" style="flex:1;min-width:200px">
-    <button class="btn" data-act="newClient">+ Nouvelle cliente</button></div></div>
-  <div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Prestations</th><th>Étiquettes</th></tr></thead><tbody>
+    <button class="btn" data-act="newClient">+ Nouvelle cliente</button></div>
+  <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+    <span class="hint" style="min-width:60px">Filtrer</span>
+    ${btnF('toutes','Toutes')}${btnF('actives','Actives')}${btnF('recentes','Vues &lt; 3 mois')}${btnF('perdues','Sans venue &gt; 6 mois')}${btnF('jamais','Jamais venues')}${btnF('newsletter','Newsletter')}${btnF('rgpd','Consentement manquant')}
+  </div>
+  <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+    <span class="hint" style="min-width:60px">Trier</span>
+    ${btnS('nom','Nom A→Z')}${btnS('creation','Date de création')}${btnS('derniere','Dernier rendez-vous')}${btnS('venues','Nombre de venues')}
+  </div></div>
+  <div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Créée le</th><th>Prestations</th><th>Étiquettes</th></tr></thead><tbody>
   ${list.map(c=>{const dates=db.seances.filter(s=>s.clientId===c.id).map(s=>s.date).sort();const ns=dates.length;
     const tags=[c.nuskin?'<span class="badge">NuSkin</span>':'',c.jolimoi?'<span class="badge">Jolimoi</span>':'',
       c.newsletter&&c.newsletter.abonnee?'<span class="badge ok">Newsletter ✓</span>':c.newsletter?'<span class="badge warn">Désabonnée</span>':'',
@@ -388,7 +442,8 @@ function viewClients(){
     return`<tr><td><span class="clickable" data-act="openClient" data-id="${c.id}">${esc(C.name(c))}</span>${c.statut==='inactive'?' <span class="badge err">inactive</span>':''}</td>
     <td>${esc(c.email||'—')}</td>
     <td style="white-space:nowrap">${esc(c.tel||'—')}</td>
-    <td>${ns?`${ns} · dern. ${fdate(dates[ns-1])}`:'—'}</td>
+    <td style="white-space:nowrap">${c.createdAt?fdate(c.createdAt):'—'}</td>
+    <td>${ns?`${ns} · dern. ${fdate(dates[ns-1])}`:'<span class="hint">jamais venue</span>'}</td>
     <td>${tags||'—'}</td></tr>`;}).join('')}
   </tbody></table>`:'<p class="hint">Aucune cliente ne correspond.</p>'}</div>`;
 }
@@ -398,6 +453,17 @@ const FICHE_TPL={
   conseils:[['Alimentation',''],['Hygiène de vie',''],['Plantes & compléments',''],['Autres recommandations','']],
   suivi:[['Évolution depuis la dernière séance',''],['Ressentis exprimés',''],['Ajustements proposés',''],['Prochaine étape','']],
 };
+function cartesClient(c){return db.cartes.filter(cc=>cc.acheteuseId===c.id||norm(cc.beneficiaire||'')===norm(C.name(c)));}
+function resumeClient(c){
+  const ses=db.seances.filter(s=>s.clientId===c.id&&!s.prevu).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const ca=ses.reduce((t,s)=>t+(+s.montant||0),0)+db.ventes.filter(v=>v.clientId===c.id).reduce((t,v)=>t+(+v.total||+v.montant||0),0);
+  const prochaine=db.seances.filter(s=>s.clientId===c.id&&s.prevu&&s.date>=today()).sort((a,b)=>(a.date||'').localeCompare(b.date||''))[0];
+  const top=(()=>{const m={};ses.forEach(s=>{m[s.designation]=(m[s.designation]||0)+1;});
+    const e=Object.entries(m).sort((a,b)=>b[1]-a[1])[0];return e?e[0]:null;})();
+  const cc=cartesClient(c).filter(x=>!carteEpuisee(x));
+  return{nb:ses.length,ca,premiere:ses[0]?ses[0].date:'',derniere:ses.length?ses[ses.length-1].date:'',prochaine,top,cartes:cc.length,
+    questionnaire:(c.questionnaire||[]).length};
+}
 function viewClientDetail(){
   const c=C.get(state.clientId);if(!c){state.clientId=null;return viewClients();}
   const nl=c.newsletter;
@@ -412,14 +478,24 @@ function viewClientDetail(){
     ${nl?(nl.abonnee?`<span class="badge ok">Newsletter ✓${nl.date?' depuis le '+fdate(nl.date):''}</span>`:'<span class="badge warn">Désabonnée newsletter</span>'):'<span class="badge">Newsletter : inconnu</span>'}
     ${c.consentement?'<span class="badge ok">Consentement RGPD ✓</span>':'<span class="badge warn">Consentement à recueillir</span>'}
   </div>`;
-  const tabs=['infos','seances','ventes','fiches','questionnaire','factures'];
-  const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',questionnaire:'Questionnaire',factures:'Factures'};
+  const tabs=['infos','seances','ventes','fiches','questionnaire','ateliers','cartes','factures'];
+  const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
   const nav=`<div class="tabs">${tabs.map(t=>`<button data-act="tab" data-tab="${t}" class="${state.tab===t?'on':''}">${tl[t]}</button>`).join('')}</div>`;
-  return head+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,questionnaire:tabQuest,factures:tabFactures}[state.tab]||tabInfos)(c);
+  return head+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
 }
 function tabInfos(c){
-  const at=db.ateliers.filter(a=>(a.participants||[]).some(p=>p.clientId===c.id));
-  return`<form class="card" data-form="saveClient" data-id="${c.id}"><h2>Informations personnelles</h2>
+  const r=resumeClient(c);
+  const resume=`<div class="card"><h2>En bref</h2>
+  <div class="grid4">
+    <div class="kpi"><div class="n">${r.nb}</div><div class="l">Prestation${r.nb>1?'s':''}</div></div>
+    <div class="kpi"><div class="n">${eur(r.ca)}</div><div class="l">Total dépensé</div></div>
+    <div class="kpi"><div class="n" style="font-size:20px">${r.derniere?fdate(r.derniere):'—'}</div><div class="l">Dernière venue</div></div>
+    <div class="kpi"><div class="n" style="font-size:20px">${r.prochaine?fdate(r.prochaine.date):'—'}</div><div class="l">Prochain rendez-vous</div></div>
+  </div>
+  <p class="hint" style="margin-top:10px">
+    ${r.premiere?`Cliente depuis le ${fdate(r.premiere)}. `:''}${r.top?`Prestation la plus prise : <b>${esc(r.top)}</b>. `:''}${r.cartes?`<b>${r.cartes}</b> carte cadeau en cours. `:''}${r.questionnaire?`Questionnaire d’accueil rempli.`:'Questionnaire d’accueil non rempli.'}
+  </p></div>`;
+  return resume+`<form class="card" data-form="saveClient" data-id="${c.id}"><h2>Informations personnelles</h2>
   <div class="grid3">
     <div><label>Prénom</label><input name="prenom" value="${esc(c.prenom)}"></div>
     <div><label>Nom</label><input name="nom" value="${esc(c.nom)}"></div>
@@ -445,8 +521,31 @@ function tabInfos(c){
     <div style="grid-column:span 2"><p class="hint" style="margin:22px 0 0">Se règle aussi par l’import MailerLite. La saisie manuelle ici fait foi et écrase l’import précédent.</p></div>
   </div>
   <div style="margin-top:12px"><label>Notes de suivi (préférences, contre-indications, contexte…)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
-  <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button></div></form>
-  <div class="card"><h2>Ateliers suivis</h2>${at.length?`<table><tbody>${at.map(a=>`<tr><td>${fdate(a.date)}</td><td>${esc(a.titre)}</td><td>${esc(a.lieu||'')}</td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune participation enregistrée. Les participations s’ajoutent depuis l’onglet Ateliers.</p>'}</div>`;
+  <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button></div></form>`;
+}
+function tabAteliersClient(c){
+  const at=db.ateliers.filter(a=>(a.participants||[]).some(p=>p.clientId===c.id))
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  return`<div class="card"><h2>Ateliers suivis</h2>
+  ${at.length?`<table><thead><tr><th>Date</th><th>Atelier</th><th>Lieu</th><th>Retour de la participante</th></tr></thead><tbody>
+  ${at.map(a=>{const p=(a.participants||[]).find(x=>x.clientId===c.id)||{};
+    return`<tr><td style="white-space:nowrap">${fdate(a.date)}</td><td>${esc(a.titre)}</td><td>${esc(a.lieu||'—')}</td>
+    <td>${p.avis?esc(p.avis):'<span class="hint">—</span>'}</td></tr>`;}).join('')}
+  </tbody></table>`:'<p class="hint">Aucune participation enregistrée. Les participations s’ajoutent depuis le menu Ateliers.</p>'}
+  <div class="row" style="margin-top:12px"><button class="btn sm soft" data-act="goAteliers">Ouvrir le menu Ateliers →</button></div></div>`;
+}
+function tabCartesClient(c){
+  const list=cartesClient(c).sort((a,b)=>(b.dateEmission||'').localeCompare(a.dateEmission||''));
+  return`<div class="card"><h2>Cartes cadeaux</h2>
+  ${list.length?`<table><thead><tr><th>N°</th><th>Émise le</th><th>Rôle</th><th>Valeur</th><th>Solde</th><th>État</th><th></th></tr></thead><tbody>
+  ${list.map(cc=>{const role=cc.acheteuseId===c.id?'Acheteuse':'Bénéficiaire';
+    return`<tr><td style="font-weight:600">${esc(cc.num)}</td><td style="white-space:nowrap">${fdate(cc.dateEmission)}</td><td>${role}</td>
+    <td>${+cc.montant>0?eur(cc.montant):esc(cc.soin||'Soin offert')}</td>
+    <td>${+cc.montant>0?eur(carteSolde(cc)):'—'}</td>
+    <td>${carteEtatBadge(cc)}</td>
+    <td style="text-align:right"><button class="btn sm soft" data-act="goCarte" data-id="${cc.id}">Ouvrir →</button></td></tr>`;}).join('')}
+  </tbody></table>`:'<p class="hint">Aucune carte cadeau achetée ni reçue par cette cliente.</p>'}
+  <div class="row" style="margin-top:12px"><button class="btn sm soft" data-act="goCartes">Ouvrir le menu Cartes cadeaux →</button></div></div>`;
 }
 function tabSeances(c){
   const list=db.seances.filter(s=>s.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -547,8 +646,10 @@ function viewAteliers(){
   return`<div class="card"><div class="row" style="justify-content:space-between"><h2>${esc(a.titre)} — ${fdate(a.date)}</h2>
     <button class="btn sm danger" data-act="delAtelier" data-id="${a.id}">Supprimer</button></div>
   <p class="hint">${esc(a.lieu||'Lieu non précisé')} · ${parts.length} participante${parts.length>1?'s':''}</p>
-  ${parts.length?`<table><thead><tr><th>Participante</th><th>Paiement</th><th style="text-align:right">Montant</th><th></th></tr></thead><tbody>
-  ${parts.map((p,i)=>`<tr><td>${esc(p.clientId?C.name(C.get(p.clientId)):p.nom)}</td><td>${esc(p.paiement||'—')}</td><td style="text-align:right">${eur(p.montant)}</td><td><button class="btn sm danger" data-act="delPart" data-id="${a.id}" data-i="${i}">✕</button></td></tr>`).join('')}</tbody></table>`:''}
+  ${parts.length?`<table><thead><tr><th>Participante</th><th>Paiement</th><th style="text-align:right">Montant</th><th>Retour / avis</th><th></th></tr></thead><tbody>
+  ${parts.map((p,i)=>`<tr><td>${esc(p.clientId?C.name(C.get(p.clientId)):p.nom)}</td><td>${esc(p.paiement||'—')}</td><td style="text-align:right">${eur(p.montant)}</td>
+  <td><textarea data-act="avisPart" data-id="${a.id}" data-i="${i}" rows="2" placeholder="Ce qu’elle en a dit…" style="width:100%;min-width:180px">${esc(p.avis||'')}</textarea></td>
+  <td><button class="btn sm danger" data-act="delPart" data-id="${a.id}" data-i="${i}">✕</button></td></tr>`).join('')}</tbody></table>`:''}
   <form class="row" data-form="addPart" data-id="${a.id}" style="margin-top:10px">
     <div style="min-width:200px;flex:1">${selClients('name="clientId"')}</div>
     <input name="nom" placeholder="ou nom libre" style="max-width:160px">
@@ -559,6 +660,22 @@ function viewAteliers(){
 
 /* ═════════ CARTES CADEAUX ═════════ */
 function carteSolde(cc){return Math.max(0,+cc.montant-(cc.utilisations||[]).reduce((s,u)=>s+ +u.montant,0));}
+function carteEpuisee(cc){return !(+cc.montant>0)?((cc.utilisations||[]).length>0):(carteSolde(cc)<=0);}
+function cartePerimee(cc){return !!cc.validite&&cc.validite<today();}
+function carteEtatBadge(cc){
+  if(carteEpuisee(cc))return'<span class="badge">Utilisée</span>';
+  if(cartePerimee(cc))return'<span class="badge err">Périmée</span>';
+  const j=carteJoursDepuis(cc);
+  if(j>=180)return`<span class="badge warn">À relancer (${Math.floor(j/30)} mois)</span>`;
+  return'<span class="badge ok">En cours</span>';}
+function carteJoursDepuis(cc){
+  const rel=(cc.relances||[]).slice().sort();
+  const ref=rel.length?rel[rel.length-1]:cc.dateEmission;
+  if(!ref)return 0;
+  return Math.floor((Date.now()-new Date(ref+'T00:00:00').getTime())/864e5);}
+function cartesARelancer(){
+  return db.cartes.filter(cc=>!carteEpuisee(cc)&&!cartePerimee(cc)&&carteJoursDepuis(cc)>=180)
+    .sort((a,b)=>carteJoursDepuis(b)-carteJoursDepuis(a));}
 function viewCartes(){
   const list=db.cartes.slice().sort((a,b)=>(b.dateEmission||'').localeCompare(a.dateEmission||''));
   return`<h1>Cartes cadeaux</h1><p class="sub">Émission, utilisation et soldes</p>
@@ -567,7 +684,7 @@ function viewCartes(){
     <div><label>Support</label><select name="support" data-act="supportPick"><option value="elec">Électronique (modèle à imprimer/envoyer)</option><option value="phys">Physique (carte + étiquette code-barres)</option></select></div>
     <div><label>Réf. étiquette (si physique)</label><input name="ref" placeholder="ex. INSPIREB 007"></div>
     <div><label>Date d’émission</label><input type="date" name="dateEmission" value="${today()}" required></div>
-    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" value="0" required><span class="hint">0 € = carte « soin offert » sans valeur monétaire</span></div>
+    <div><label>Montant (€)</label><input type="text" inputmode="decimal" name="montant" value="0" required><span class="hint">0 € = carte « soin offert » sans valeur monétaire</span></div>
     <div><label>Soin offert (facultatif)</label><input name="soin" placeholder="ex. Soin Duo Séréni’Baie — sinon le montant s’affiche"></div>
     <div><label>Acheteuse</label>${selClients('name="acheteuseId"')}</div>
     <div><label>ou acheteur·se libre</label><input name="acheteuseNom"></div>
@@ -589,9 +706,10 @@ function viewCartes(){
     <div><label>Mode de paiement</label>${selModes('paiement',cc.paiement)}</div>
     <div><label>Valable jusqu’au</label><input type="date" name="validite" value="${esc(cc.validite)}"></div></div>
   <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button><button type="button" class="btn ghost" data-act="cancelEditCarte">Annuler</button></div></form></div>`;
-  return`<div class="card"><div class="row" style="justify-content:space-between">
+  return`<div class="card" data-carte="${cc.id}"${state.highlightCarte===cc.id?' style="outline:2px solid var(--gold)"':''}><div class="row" style="justify-content:space-between">
     <h2>${esc(cc.num)} ${cc.support==='phys'?'<span class="badge" style="background:var(--gold-soft);color:#7a5a24">Physique</span>':'<span class="badge">Électronique</span>'} ${isSoin?(utilisee?'<span class="badge">Utilisée le '+fdate(cc.utilisations[0].date)+'</span>':perimee?'<span class="badge err">Périmée</span>':'<span class="badge ok">À utiliser</span>'):(epuisee?'<span class="badge">Épuisée</span>':perimee?'<span class="badge err">Périmée</span>':'<span class="badge ok">Solde '+eur(solde)+'</span>')}</h2>
-    <div class="row"><button class="btn sm ghost" data-act="editCarte" data-id="${cc.id}">✎ Modifier</button><button class="btn sm soft" data-act="printCarte" data-id="${cc.id}">Imprimer / PDF</button><button class="btn sm danger" data-act="delCarte" data-id="${cc.id}">✕</button></div></div>
+    <div class="row"><button class="btn sm ghost" data-act="editCarte" data-id="${cc.id}">✎ Modifier</button><button class="btn sm soft" data-act="printCarte" data-id="${cc.id}">Imprimer / PDF</button>${!epuisee&&!perimee?`<button class="btn sm ${carteJoursDepuis(cc)>=180?'':'ghost'}" data-act="relanceCarte" data-id="${cc.id}">✓ Relancée aujourd’hui</button>`:''}<button class="btn sm danger" data-act="delCarte" data-id="${cc.id}">✕</button></div></div>
+  ${!epuisee&&!perimee?`<p class="hint">Sans nouvelle depuis <b>${carteJoursDepuis(cc)} jours</b>${(cc.relances||[]).length?` · dernière relance le ${fdate((cc.relances||[]).slice().sort().pop())} (${cc.relances.length} au total)`:' · aucune relance'}${carteJoursDepuis(cc)>=180?' — <span class="badge warn">à relancer</span>':''}</p>`:''}
   <p class="hint">Émise le ${fdate(cc.dateEmission)} · ${isSoin?esc(cc.soin||'Soin offert')+' (sans valeur monétaire)':(cc.soin?esc(cc.soin)+' ('+eur(cc.montant)+')':eur(cc.montant))} · ${isSoin?'offerte':'payée en '+esc(cc.paiement||'—')} · acheteuse : ${esc(cc.acheteuseId?C.name(C.get(cc.acheteuseId)):cc.acheteuseNom||'—')} · bénéficiaire : ${esc(cc.beneficiaire||'—')} · valable jusqu’au ${fdate(cc.validite)}</p>
   ${(cc.utilisations||[]).length?`<table><tbody>${cc.utilisations.map(u=>`<tr><td>${fdate(u.date)}</td><td>${esc(u.note||'Utilisation')}</td><td style="text-align:right">− ${eur(u.montant)}</td></tr>`).join('')}</tbody></table>`:''}
   ${epuisee?'':isSoin?`<form class="row" data-form="useCarte" data-id="${cc.id}" style="margin-top:8px">
@@ -802,8 +920,8 @@ function viewRdv(){
 
 /* ═════════ CATALOGUE ═════════ */
 function equipCoutUsage(eq){const p=+eq.prixAchat||0,d=+eq.dureeMois||1,u=+eq.usagesMois||1;return p/d/u;}
-function soinCoutUnitaire(s){const eq=s.equipementId?db.equipements.find(e=>e.id===s.equipementId):null;
-  return(+s.coutVariable||0)+(eq?equipCoutUsage(eq):0);}
+function soinEquips(s){return(s.equipementIds||[]).map(eid=>db.equipements.find(e=>e.id===eid)).filter(Boolean);}
+function soinCoutUnitaire(s){return(+s.coutVariable||0)+soinEquips(s).reduce((t,eq)=>t+equipCoutUsage(eq),0);}
 function viewCatalogue(){
   return`<h1>Catalogue</h1><p class="sub">Soins et produits — sert de référentiel aux imports Setmore et aux séances</p>
   <div class="card"><h2>Équipements amortis</h2>
@@ -823,25 +941,25 @@ function viewCatalogue(){
     <input type="number" name="usagesMois" placeholder="Usages estimés/mois" value="20" style="max-width:140px">
     <button class="btn sm">+ Ajouter</button></form></div>
   <div class="card"><h2>Soins</h2>
-  <p class="hint" style="margin-bottom:10px">Coût variable = consommables (huile, dose de produit…). Équipement facultatif = appareil utilisé pendant ce soin.</p>
+  <p class="hint" style="margin-bottom:10px">Coût variable = consommables (huile, dose de produit…). Équipements : Ctrl + clic (Cmd sur Mac) pour en sélectionner plusieurs — leurs coûts d’utilisation s’additionnent au coût de revient.</p>
   <table><thead><tr><th>Désignation</th><th>Catégorie</th><th>Durée</th><th>Prix</th><th>Coût variable</th><th>Équipement</th><th>Coût de revient</th><th></th></tr></thead><tbody>
   ${db.soins.map(s=>state.editSoin===s.id?`<tr><td colspan="8"><form class="row" data-form="updSoin" data-id="${s.id}">
     <input name="designation" value="${esc(s.designation)}" required style="flex:2;min-width:150px">
     <input name="categorie" value="${esc(s.categorie)}" style="flex:1;min-width:100px">
     <input type="number" name="duree" value="${s.duree}" style="max-width:80px">
-    <input type="number" step="0.01" name="prix" value="${s.prix}" style="max-width:90px">
-    <input type="number" step="0.01" name="coutVariable" value="${s.coutVariable||0}" placeholder="Coût variable €" style="max-width:120px">
-    <select name="equipementId" style="max-width:160px"><option value="">Aucun équipement</option>${db.equipements.map(e=>`<option value="${e.id}" ${e.id===s.equipementId?'selected':''}>${esc(e.nom)}</option>`).join('')}</select>
+    <input type="text" inputmode="decimal" name="prix" value="${s.prix}" style="max-width:90px">
+    <input type="text" inputmode="decimal" name="coutVariable" value="${s.coutVariable||0}" placeholder="Coût variable €" style="max-width:120px">
+    <select name="equipementIds" multiple size="${Math.min(4,Math.max(2,db.equipements.length))}" style="max-width:200px" title="Ctrl/Cmd + clic pour en choisir plusieurs">${db.equipements.map(e=>`<option value="${e.id}" ${(s.equipementIds||[]).includes(e.id)?'selected':''}>${esc(e.nom)}</option>`).join('')||'<option disabled>Aucun équipement</option>'}</select>
     <button class="btn sm">✓ Enregistrer</button><button type="button" class="btn sm ghost" data-act="cancelEdit">Annuler</button></form></td></tr>`
-  :(()=>{const cr=soinCoutUnitaire(s);const eq=s.equipementId?db.equipements.find(e=>e.id===s.equipementId):null;
-    return`<tr><td>${esc(s.designation)}</td><td>${esc(s.categorie)}</td><td>${s.duree} min</td><td>${eur(s.prix)}</td><td>${eur(s.coutVariable||0)}</td><td>${eq?esc(eq.nom):'<span class="hint">—</span>'}</td><td style="font-weight:600">${eur(cr)}</td><td class="row"><button class="btn sm ghost" data-act="editSoin" data-id="${s.id}">✎</button><button class="btn sm danger" data-act="delSoin" data-id="${s.id}">✕</button></td></tr>`;})()).join('')}</tbody></table>
+  :(()=>{const cr=soinCoutUnitaire(s);const eqs=soinEquips(s);
+    return`<tr><td>${esc(s.designation)}</td><td>${esc(s.categorie)}</td><td>${s.duree} min</td><td>${eur(s.prix)}</td><td>${eur(s.coutVariable||0)}</td><td>${eqs.length?eqs.map(e=>`<span class="badge">${esc(e.nom)}</span>`).join(' '):'<span class="hint">—</span>'}</td><td style="font-weight:600">${eur(cr)}</td><td class="row"><button class="btn sm ghost" data-act="editSoin" data-id="${s.id}">✎</button><button class="btn sm danger" data-act="delSoin" data-id="${s.id}">✕</button></td></tr>`;})()).join('')}</tbody></table>
   <form class="row" data-form="addSoin" style="margin-top:12px">
     <input name="designation" placeholder="Désignation" required style="flex:2;min-width:160px">
     <input name="categorie" placeholder="Catégorie" style="flex:1;min-width:110px">
     <input type="number" name="duree" placeholder="min" style="max-width:80px">
-    <input type="number" step="0.01" name="prix" placeholder="€" style="max-width:90px">
-    <input type="number" step="0.01" name="coutVariable" placeholder="Coût variable €" style="max-width:130px">
-    <select name="equipementId" style="max-width:160px"><option value="">Aucun équipement</option>${db.equipements.map(e=>`<option value="${e.id}">${esc(e.nom)}</option>`).join('')}</select>
+    <input type="text" inputmode="decimal" name="prix" placeholder="€" style="max-width:90px">
+    <input type="text" inputmode="decimal" name="coutVariable" placeholder="Coût variable €" style="max-width:130px">
+    <select name="equipementIds" multiple size="${Math.min(4,Math.max(2,db.equipements.length))}" style="max-width:200px" title="Ctrl/Cmd + clic pour en choisir plusieurs">${db.equipements.map(e=>`<option value="${e.id}">${esc(e.nom)}</option>`).join('')||'<option disabled>Aucun équipement</option>'}</select>
     <button class="btn sm">+ Ajouter</button></form></div>
   <div class="card"><h2>Produits</h2>
   <table><thead><tr><th>Désignation</th><th>Marque</th><th>Prix</th><th></th></tr></thead><tbody>
@@ -854,7 +972,7 @@ function viewCatalogue(){
   <form class="row" data-form="addProduit" style="margin-top:12px">
     <input name="designation" placeholder="Désignation" required style="flex:2;min-width:160px">
     <input name="marque" placeholder="Marque" style="flex:1;min-width:110px">
-    <input type="number" step="0.01" name="prix" placeholder="€" style="max-width:90px">
+    <input type="text" inputmode="decimal" name="prix" placeholder="€" style="max-width:90px">
     <button class="btn sm">+ Ajouter</button></form></div>`;
 }
 
@@ -1072,6 +1190,14 @@ document.addEventListener('click',async(e)=>{
   const A={
     newClient(){const c=C.add({});saveLocal();state.clientId=c.id;state.tab='infos';render();},
     openClient(){state.view='clients';state.clientId=id;state.tab='infos';state.ficheEdit=null;render();},
+    goAteliers(){state.view='ateliers';state.clientId=null;render();},
+    goCartes(){state.view='cartes';state.clientId=null;render();},
+    goCarte(){state.view='cartes';state.clientId=null;state.highlightCarte=id;render();
+      setTimeout(()=>{const el=document.querySelector('[data-carte="'+id+'"]');if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},60);},
+    relanceCarte(){const cc=db.cartes.find(x=>x.id===id);if(!cc)return;
+      cc.relances=cc.relances||[];cc.relances.push(today());saveLocal();render();toast('Relance notée — prochaine échéance dans 6 mois');},
+    clientSort(){state.cliSort=el.dataset.sort;render();},
+    clientFiltre(){state.cliFiltre=el.dataset.filtre;render();},
     backClients(){state.clientId=null;state.ficheEdit=null;state.rdv=null;render();},
     tab(){state.tab=el.dataset.tab;state.ficheEdit=null;render();},
     finTab(){state.finTab=el.dataset.tab;state.editEquip=null;render();},
@@ -1129,7 +1255,7 @@ document.addEventListener('click',async(e)=>{
     editProduit(){state.editProduit=id;state.editSoin=null;render();},
     cancelEdit(){state.editSoin=null;state.editProduit=null;state.editEquip=null;render();},
     editEquip(){state.editEquip=id;state.editSoin=null;state.editProduit=null;render();},
-    delEquip(){if(db.soins.some(s=>s.equipementId===id))return toast('Un soin utilise encore cet équipement — modifiez-le d’abord',true);
+    delEquip(){if(db.soins.some(s=>(s.equipementIds||[]).includes(id)))return toast('Un soin utilise encore cet équipement — modifiez-le d’abord',true);
       db.equipements=db.equipements.filter(e=>e.id!==id);saveLocal();render();},
     editCarte(){state.editCarte=id;render();},
     cancelEditCarte(){state.editCarte=null;render();},
@@ -1155,7 +1281,9 @@ document.addEventListener('click',async(e)=>{
 
 document.addEventListener('submit',(e)=>{
   const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();
-  const d=Object.fromEntries(new FormData(f).entries());const id=f.dataset.id;
+  const FD=new FormData(f);
+  const d=Object.fromEntries(FD.entries());const id=f.dataset.id;
+  const getAll=(nm)=>FD.getAll(nm).filter(v=>v!=='');
   const F={
     saveClient(){const c=C.get(id);Object.assign(c,{prenom:d.prenom,nom:d.nom,naissance:d.naissance,email:d.email,tel:d.tel,statut:d.statut,adresse:d.adresse,cp:d.cp,ville:d.ville,notes:d.notes,nuskin:!!d.nuskin,jolimoi:!!d.jolimoi});
       if(d.consentement&&!c.consentement)c.consentementDate=today();c.consentement=!!d.consentement;
@@ -1183,13 +1311,13 @@ document.addEventListener('submit',(e)=>{
     addAtelier(){db.ateliers.push({id:uid('a'),date:d.date,titre:d.titre,lieu:d.lieu||'',tarif:+d.tarif||0,participants:[]});saveLocal();render();toast('Atelier créé');},
     addPart(){const a=db.ateliers.find(x=>x.id===id);if(!a)return;
       if(!d.clientId&&!d.nom)return toast('Choisissez une cliente ou saisissez un nom',true);
-      a.participants.push({clientId:d.clientId||'',nom:d.nom||'',montant:+d.montant||0,paiement:d.paiement});saveLocal();render();toast('Participation ajoutée');},
+      a.participants.push({clientId:d.clientId||'',nom:d.nom||'',montant:numFR(d.montant),paiement:d.paiement,avis:''});saveLocal();render();toast('Participation ajoutée');},
     addCarte(){const support=d.support||'elec';const ref=(d.ref||'').trim().toUpperCase();let num;
       if(support==='phys'&&ref)num=ref;
       else if(support==='elec'){db.counters.carteE=(db.counters.carteE||0)+1;num='INSPIREB '+String(db.counters.carteE).padStart(3,'0')+'e';}
       else num=nextNum('CC','carte');
       if(db.cartes.some(x=>x.num===num))return toast('Le numéro '+num+' existe déjà — vérifiez la référence',true);
-      db.cartes.push({id:uid('cc'),num,support,ref,soin:(d.soin||'').trim(),dateEmission:d.dateEmission,montant:+d.montant||0,acheteuseId:d.acheteuseId||'',acheteuseNom:d.acheteuseNom||'',beneficiaire:d.beneficiaire||'',paiement:d.paiement,validite:d.validite,utilisations:[]});
+      db.cartes.push({id:uid('cc'),num,support,ref,soin:(d.soin||'').trim(),dateEmission:d.dateEmission,montant:numFR(d.montant),acheteuseId:d.acheteuseId||'',acheteuseNom:d.acheteuseNom||'',beneficiaire:d.beneficiaire||'',paiement:d.paiement,validite:d.validite,utilisations:[]});
       saveLocal();render();toast('Carte '+num+' émise');},
     updCarte(){const cc=db.cartes.find(x=>x.id===id);if(!cc)return;
       const oldSupport=cc.support,oldRef=cc.ref;
@@ -1201,8 +1329,8 @@ document.addEventListener('submit',(e)=>{
       if(!(+cc.montant>0)){cc.utilisations.push({date:d.date,montant:0,note:d.note||''});saveLocal();render();toast('Carte marquée comme utilisée');return;}
       const m=+d.montant||0;if(m<=0)return;if(m>carteSolde(cc))return toast('Montant supérieur au solde restant',true);
       cc.utilisations.push({date:d.date,montant:m,note:d.note||''});saveLocal();render();toast('Utilisation enregistrée — solde : '+eur(carteSolde(cc)));},
-    addSoin(){db.soins.push({id:uid('s'),designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});saveLocal();render();},
-    updSoin(){const x=db.soins.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:+d.prix||0,coutVariable:+d.coutVariable||0,equipementId:d.equipementId||''});
+    addSoin(){db.soins.push({id:uid('s'),designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:numFR(d.prix),coutVariable:numFR(d.coutVariable),equipementIds:getAll('equipementIds')});saveLocal();render();},
+    updSoin(){const x=db.soins.find(v=>v.id===id);if(!x)return;Object.assign(x,{designation:d.designation,categorie:d.categorie||'',duree:+d.duree||60,prix:numFR(d.prix),coutVariable:numFR(d.coutVariable),equipementIds:getAll('equipementIds')});
       db.seances.forEach(se=>{if(se.soinId===id)se.designation=x.designation;});state.editSoin=null;saveLocal();render();toast('Soin modifié');},
     addEquip(){if(!(d.nom||'').trim())return toast('Indiquez le nom de l’appareil',true);
       const pa=numFR(d.prixAchat);
@@ -1263,6 +1391,13 @@ document.addEventListener('change',async(e)=>{
   el.value='';
 });
 
+document.addEventListener('change',(e)=>{
+  const t=e.target;
+  if(t.dataset&&t.dataset.act==='avisPart'){
+    const a=db.ateliers.find(x=>x.id===t.dataset.id);
+    if(a&&a.participants[+t.dataset.i]){a.participants[+t.dataset.i].avis=t.value;saveLocal();toast('Retour enregistré');}
+  }
+});
 document.addEventListener('input',(e)=>{
   if(e.target.id==='searchClient'){state.search=e.target.value;const pos=e.target.selectionStart;
     $('#view').innerHTML=viewClients();const inp=$('#searchClient');if(inp){inp.focus();inp.setSelectionRange(pos,pos);}}

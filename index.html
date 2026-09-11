@@ -219,7 +219,7 @@ const SEED_SOINS=[
   {id:'s6',designation:'Conseil Beauté',categorie:'Conseil',duree:60,prix:0},
   {id:'s7',designation:'Soin Duo Séréni\u2019Baie',categorie:'Duo',duree:90,prix:110},
 ];
-const DB_DEFAULT={v:3,clients:[],seances:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],equipements:[],fin:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0}};
+const DB_DEFAULT={v:3,clients:[],seances:[],sessions:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],equipements:[],fin:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0}};
 let db=structuredClone(DB_DEFAULT);
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch(e){return false;}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 function saveLocal(){db.settings.gh.token='';store.set('inspireb_db',JSON.stringify(db));setDirty(true);scheduleAuto();}
@@ -230,6 +230,8 @@ function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:
     delete s.equipementId;});
   db.cartes.forEach(cc=>{if(!Array.isArray(cc.relances))cc.relances=[];});
   db.repEnAttente=db.repEnAttente||[];
+  db.sessions=db.sessions||[];
+  db.seances.forEach(se=>{if(se.sessionId===undefined)se.sessionId='';});
   db.clients.forEach(c=>{c.rep=c.rep||{};c.repAutre=c.repAutre||{};});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
 let dirty=false;function setDirty(d){dirty=d;const b=$('#syncBadge');if(b)b.style.display=d&&ghOK()?'inline-block':'none';updateSyncBtn();}
@@ -461,7 +463,7 @@ function viewClients(){
     <td>${tags||'—'}</td></tr>`;}).join('')}
   </tbody></table>`:'<p class="hint">Aucune cliente ne correspond.</p>'}</div>`;
 }
-function ficheLabel(t){return{synthese:'Fiche de synthèse',conseils:'Fiche de conseils',suivi:'Fiche de suivi'}[t]||t;}
+function ficheLabel(t){return{synthese:'Fiche de synthèse (ancien format)',conseils:'Fiche conseil',suivi:'Fiche de suivi (ancien format)'}[t]||t;}
 const FICHE_TPL={
   synthese:[['Motif de la venue',''],['Observations pendant la séance',''],['Bilan de la séance',''],['Points clés à retenir','']],
   conseils:[['Alimentation',''],['Hygiène de vie',''],['Plantes & compléments',''],['Autres recommandations','']],
@@ -483,7 +485,7 @@ function viewClientDetail(){
   const nl=c.newsletter;
   const head=`<div class="row" style="justify-content:space-between;margin-bottom:6px">
     <button class="btn ghost sm" data-act="backClients">← Clientes</button>
-    <div class="row"><button class="btn sm" data-act="prepRdv" data-id="${c.id}">▶ Séance guidée</button>
+    <div class="row"><button class="btn sm" data-act="prepRdv" data-id="${c.id}">▶ Suivi séance</button>
     <button class="btn danger sm" data-act="rgpdExport" data-id="${c.id}">Exporter ses données</button>
     <button class="btn danger sm" data-act="delClient" data-id="${c.id}">Supprimer (RGPD)</button></div></div>
   <h1>${esc(C.name(c))}</h1>
@@ -492,10 +494,10 @@ function viewClientDetail(){
     ${nl?(nl.abonnee?`<span class="badge ok">Newsletter ✓${nl.date?' depuis le '+fdate(nl.date):''}</span>`:'<span class="badge warn">Désabonnée newsletter</span>'):'<span class="badge">Newsletter : inconnu</span>'}
     ${c.consentement?'<span class="badge ok">Consentement RGPD ✓</span>':'<span class="badge warn">Consentement à recueillir</span>'}
   </div>`;
-  const tabs=['infos','seances','ventes','fiches','questionnaire','ateliers','cartes','factures'];
-  const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
+  const tabs=['infos','seances','ventes','fiches','photos','questionnaire','ateliers','cartes','factures'];
+  const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',photos:'Suivi photos',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
   const nav=`<div class="tabs">${tabs.map(t=>`<button data-act="tab" data-tab="${t}" class="${state.tab===t?'on':''}">${tl[t]}</button>`).join('')}</div>`;
-  return head+bandeauAlertes(c)+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
+  return head+bandeauAlertes(c)+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,photos:tabPhotos,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
 }
 function tabInfos(c){
   const r=resumeClient(c);
@@ -525,6 +527,7 @@ function tabInfos(c){
     <label class="check"><input type="checkbox" name="nuskin" ${c.nuskin?'checked':''}> Cliente NuSkin</label>
     <label class="check"><input type="checkbox" name="jolimoi" ${c.jolimoi?'checked':''}> Cliente Jolimoi</label>
     <label class="check"><input type="checkbox" name="consentement" ${c.consentement?'checked':''}> Consentement RGPD recueilli</label>
+    <label class="check"><input type="checkbox" name="consentPhoto" ${c.consentPhoto?'checked':''}> Consentement photo (avant / après)</label>
   </div>
   <div class="grid3" style="margin-top:12px">
     <div><label>Newsletter</label><select name="newsletter">
@@ -537,6 +540,20 @@ function tabInfos(c){
   <div style="margin-top:12px"><label>Notes de suivi (préférences, contre-indications, contexte…)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
   <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button></div></form>`;
 }
+function tabPhotos(c){
+  const sessions=db.sessions.filter(x=>x.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  return`<div class="card"><h2>Suivi photos</h2>
+  <p class="hint">Avant / après par séance, pour suivre l’évolution et retrouver un maquillage déjà réalisé. Usage interne uniquement.</p>
+  ${c.consentPhoto?'<p><span class="badge ok">Consentement photo recueilli</span></p>':'<p><span class="badge warn">Consentement photo à recueillir</span> — à cocher sur l’onglet Infos avant toute prise de vue.</p>'}
+  <p class="hint" style="margin-top:10px">Le stockage des images n’est pas encore actif : une image dans le fichier de données le rendrait trop lourd à ouvrir. Les emplacements ci-dessous sont prêts et se rempliront quand le stockage sera en place.</p></div>
+  ${sessions.length?sessions.map(ses=>{const lg=sessionLignes(ses.id);
+    return`<div class="card"><div class="row" style="justify-content:space-between">
+    <h3 style="margin:0">${fdate(ses.date)} — ${lg.map(l=>esc(l.designation)).join(', ')||'Séance'}</h3></div>
+    <div class="grid2" style="margin-top:10px">
+      <div style="border:1px dashed var(--line);border-radius:10px;padding:26px;text-align:center;color:var(--muted)">Avant<br><span class="hint">emplacement réservé</span></div>
+      <div style="border:1px dashed var(--line);border-radius:10px;padding:26px;text-align:center;color:var(--muted)">Après<br><span class="hint">emplacement réservé</span></div>
+    </div></div>`;}).join('')
+  :'<div class="card"><p class="hint">Aucune séance enregistrée pour l’instant.</p></div>'}`;}
 function tabAteliersClient(c){
   const at=db.ateliers.filter(a=>(a.participants||[]).some(p=>p.clientId===c.id))
     .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -563,18 +580,33 @@ function tabCartesClient(c){
 }
 function tabSeances(c){
   const list=db.seances.filter(s=>s.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  return`<form class="card" data-form="addSeance" data-id="${c.id}"><h2>Ajouter une prestation</h2>
+  const ligne=(s)=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.fait===false?' <span class="badge warn">non réalisée</span>':''}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.prevu?'<span class="badge warn">À venir</span>':s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}</td><td class="row">${s.prevu?`<button class="btn sm soft" data-act="doneSeance" data-id="${s.id}">✓ Réalisée</button>`:''}<button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`;
+  const sessions=db.sessions.filter(x=>x.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const isolees=list.filter(s=>!s.sessionId||!db.sessions.some(x=>x.id===s.sessionId));
+  const blocSession=(ses)=>{const lg=sessionLignes(ses.id);
+    return`<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between">
+      <h3 style="margin:0">Séance du ${fdate(ses.date)} — ${lg.length} prestation${lg.length>1?'s':''}</h3>
+      <div><strong>${ses.offert?'Offerte':eur(ses.total)}</strong>${ses.paiement?` <span class="hint">${esc(ses.paiement)}</span>`:''}</div></div>
+    <table><tbody>${lg.map(ligne).join('')}</tbody></table>
+    ${ses.produits?`<p style="margin-top:8px"><strong>Produits utilisés :</strong> ${esc(ses.produits)}</p>`:''}
+    ${ses.ressenti?`<p style="margin-top:4px"><strong>Mon ressenti :</strong> ${esc(ses.ressenti)}</p>`:''}
+    ${ses.etat?`<p class="hint" style="margin-top:4px">État déclaré à l’accueil : ${esc(ses.etat)}</p>`:''}</div>`;};
+  return`<form class="card" data-form="addSeance" data-id="${c.id}"><h2>Ajouter une prestation isolée</h2>
   <div class="grid4">
     <div><label>Date</label><input type="date" name="date" value="${today()}" required></div>
     <div><label>Soin</label><select name="soinId" data-act="soinPick">${db.soins.map(s=>`<option value="${s.id}">${esc(s.designation)}</option>`).join('')}<option value="">Autre…</option></select></div>
-    <div><label>Montant (€)</label><input type="number" step="0.01" name="montant" id="seanceMontant" value="${db.soins[0]?db.soins[0].prix:''}"></div>
+    <div><label>Montant (€)</label><input type="text" inputmode="decimal" name="montant" id="seanceMontant" value="${db.soins[0]?db.soins[0].prix:''}"></div>
     <div><label>Mode de paiement</label>${selModes('paiement')}</div>
   </div>
   <div class="row" style="margin-top:10px"><label class="check"><input type="checkbox" name="offert"> Prestation offerte</label>
-  <input name="notes" placeholder="Note rapide (facultatif)" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div></form>
+  <input name="notes" placeholder="Note rapide (facultatif)" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div>
+  <p class="hint" style="margin-top:8px">Pour une séance complète avec ressenti et fiche conseil, utilisez plutôt le bouton Suivi séance en haut de la fiche.</p></form>
   <div class="card"><h2>Historique — ${list.length} prestation${list.length>1?'s':''}</h2>
-  ${list.length?`<table><thead><tr><th>Date</th><th>Soin</th><th>Paiement</th><th style="text-align:right">Montant</th><th></th></tr></thead><tbody>
-  ${list.map(s=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.prevu?'<span class="badge warn">À venir</span>':s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}</td><td class="row">${s.prevu?`<button class="btn sm soft" data-act="doneSeance" data-id="${s.id}">✓ Réalisée</button>`:''}<button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<p class="hint">Aucune prestation enregistrée.</p>'}</div>`;
+  ${!list.length?'<p class="hint">Aucune prestation enregistrée.</p>':''}</div>
+  ${sessions.map(blocSession).join('')}
+  ${isolees.length?`<div class="card"><h3 style="margin-top:0">Prestations isolées</h3>
+  <table><thead><tr><th>Date</th><th>Soin</th><th>Paiement</th><th style="text-align:right">Montant</th><th></th></tr></thead>
+  <tbody>${isolees.map(ligne).join('')}</tbody></table></div>`:''}`;
 }
 function tabVentes(c){
   const list=db.ventes.filter(v=>v.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -598,9 +630,8 @@ function tabFiches(c){
   const list=db.fiches.filter(f=>f.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   return`<div class="card"><h2>Créer une fiche</h2><p class="hint" style="margin-bottom:10px">Chaque type ouvre une trame pré-remplie, modifiable, imprimable à l’en-tête InspireB.</p>
   <div class="row">
-    <button class="btn soft" data-act="newFiche" data-type="synthese" data-id="${c.id}">+ Fiche de synthèse</button>
-    <button class="btn soft" data-act="newFiche" data-type="conseils" data-id="${c.id}">+ Fiche de conseils</button>
-    <button class="btn soft" data-act="newFiche" data-type="suivi" data-id="${c.id}">+ Fiche de suivi</button></div></div>
+    <button class="btn soft" data-act="newFiche" data-type="conseils" data-id="${c.id}">+ Fiche conseil</button></div>
+  <p class="hint" style="margin-top:8px">Les anciennes fiches de synthèse et de suivi restent consultables ci-dessous, mais ne sont plus créées : vos observations sont désormais conservées sur la séance elle-même.</p></div>
   <div class="card"><h2>Fiches de ${esc(c.prenom||C.name(c))}</h2>
   ${list.length?list.map(f=>`<div class="fiche-type" style="margin-bottom:12px"><div class="row" style="justify-content:space-between">
     <div><strong>${ficheLabel(f.type)}</strong> — ${esc(f.titre)}<br><span class="hint">${fdate(f.date)}</span></div>
@@ -868,6 +899,8 @@ function viewFinances(){
 
 /* ═════════ SÉANCE GUIDÉE ═════════ */
 const RDV_STEPS=['Préparation','Accueil','Soin','Conseils','Clôture'];
+function sessionLignes(sid){return db.seances.filter(s=>s.sessionId===sid);}
+function sessionDe(se){return se.sessionId?db.sessions.find(x=>x.id===se.sessionId):null;}
 function cardQuestRdv(c){
   const edition=state.rdvQuestEdit;
   const entete=`<div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -902,12 +935,16 @@ function rdvQuestAutosave(){
   return change;}
 function rdvCollect(){const r=state.rdv;if(!r)return;
   rdvQuestAutosave();
-  ['etat','obs','conseils'].forEach(k=>{const el=document.querySelector(`#view [name=${k}]`);if(el)r.data[k]=el.value;});
-  const so=document.querySelector('#view [name=rdvSoin]');if(so)r.data.soinId=so.value;
-  const mo=document.querySelector('#view [name=rdvMontant]');if(mo)r.data.montant=mo.value;
+  ['etat','obs','produits','conseils'].forEach(k=>{const el=document.querySelector(`#view [name=${k}]`);if(el)r.data[k]=el.value;});
+  (r.data.lignes||[]).forEach((L,i)=>{
+    const so=document.querySelector(`#view [name=soin_${i}]`);if(so)L.soinId=so.value;
+    const mo=document.querySelector(`#view [name=montant_${i}]`);if(mo)L.montant=mo.value;
+    const nt=document.querySelector(`#view [name=lnote_${i}]`);if(nt)L.note=nt.value;});
   const pa=document.querySelector('#view [name=rdvPaiement]');if(pa)r.data.paiement=pa.value;
   const of=document.querySelector('#view [name=rdvOffert]');if(of)r.data.offert=of.checked;
   const fc=document.querySelector('#view [name=ficheConseils]');if(fc)r.data.ficheConseils=fc.checked;}
+function rdvTotal(d){return (d.lignes||[]).reduce((t,L)=>t+numFR(L.montant),0);}
+function prixDefaut(L){const s=db.soins.find(x=>x.id===L.soinId);return L.montant!==''?L.montant:(s?s.prix:'');}
 function viewRdv(){
   const r=state.rdv;const c=C.get(r.clientId);if(!c){state.rdv=null;return viewClients();}
   const d=r.data;
@@ -932,26 +969,53 @@ function viewRdv(){
     <textarea name="etat" placeholder="Sommeil, stress, digestion, énergie, événements…">${esc(d.etat)}</textarea></div>
     ${cardQuestRdv(c)}`;
   }else if(r.step===2){
-    body=`<div class="card"><h2>Soin du jour</h2>
-    <div class="grid2"><div><label>Soin réalisé</label><select name="rdvSoin">${db.soins.map(x=>`<option value="${x.id}" ${x.id===d.soinId?'selected':''}>${esc(x.designation)}</option>`).join('')}</select></div></div>
-    <div style="margin-top:12px"><label>Observations pendant le soin</label>
-    <textarea name="obs" placeholder="Zones de tension, réactions, ressentis exprimés…">${esc(d.obs)}</textarea></div></div>`;
+    const faits=(d.lignes||[]).filter(L=>L.fait).length;
+    body=`<div class="card"><h2>Prestations de la séance</h2>
+    <p class="hint" style="margin-bottom:10px">Une ligne par soin. Cochez au fur et à mesure ; l’historique et les marges seront calculés prestation par prestation.</p>
+    ${(d.lignes||[]).map((L,i)=>`<div class="card" style="background:${L.fait?'var(--ok-soft)':'transparent'};margin-bottom:10px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:220px"><label>Soin ${i+1}</label>
+          <select name="soin_${i}">${db.soins.map(x=>`<option value="${x.id}" ${x.id===L.soinId?'selected':''}>${esc(x.designation)}</option>`).join('')}</select></div>
+        <div class="row" style="margin-top:20px">
+          <button type="button" class="btn sm ${L.fait?'':'ghost'}" data-act="rdvToggleFait" data-i="${i}">${L.fait?'✓ Réalisé':'Marquer réalisé'}</button>
+          ${(d.lignes.length>1)?`<button type="button" class="btn sm danger" data-act="rdvDelLigne" data-i="${i}">✕</button>`:''}
+        </div></div>
+      <div style="margin-top:8px"><label>Note sur ce soin (facultatif)</label>
+        <input name="lnote_${i}" value="${esc(L.note||'')}" placeholder="Zone travaillée, adaptation du jour…"></div></div>`).join('')}
+    <button type="button" class="btn sm soft" data-act="rdvAddLigne">+ Ajouter un soin à la suite</button>
+    <p class="hint" style="margin-top:8px">${faits} sur ${(d.lignes||[]).length} réalisé${faits>1?'s':''}.</p></div>
+    <div class="card"><h2>Produits utilisés</h2>
+    <p class="hint" style="margin-bottom:8px">Seule trace exploitable si une réaction survient dans les 48 heures.</p>
+    <textarea name="produits" placeholder="Huiles, sérums, masques, marques et références…">${esc(d.produits||'')}</textarea></div>
+    <div class="card"><h2>Mon ressenti et mes observations</h2>
+    <p class="hint" style="margin-bottom:8px">Votre espace. N’apparaît jamais sur ce que reçoit la cliente.</p>
+    <textarea name="obs" rows="4" placeholder="Ce que vous avez perçu, réactions du corps ou de la peau, ce à quoi penser la prochaine fois…">${esc(d.obs)}</textarea></div>`;
   }else if(r.step===3){
-    body=`<div class="card"><h2>Conseils donnés</h2>
-    <textarea name="conseils" placeholder="Alimentation, hygiène de vie, plantes, auto-massages…">${esc(d.conseils)}</textarea>
-    <label class="check" style="margin-top:10px"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer aussi une fiche de conseils imprimable à lui remettre</label></div>`;
+    body=`<div class="card"><h2>Fiche conseil</h2>
+    <p class="hint" style="margin-bottom:8px">Ce que la cliente repart avec. Contrairement à vos observations, ce texte lui est destiné.</p>
+    <textarea name="conseils" rows="6" placeholder="Alimentation, hygiène de vie, rituel à suivre, produits recommandés, auto-massages…">${esc(d.conseils)}</textarea>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer la fiche imprimable à lui remettre</label></div>`;
   }else{
-    const soin=db.soins.find(x=>x.id===d.soinId);
+    const total=d.offert?0:(d.lignes||[]).reduce((t,L)=>t+numFR(prixDefaut(L)),0);
     body=`<div class="card"><h2>Clôture</h2>
+    <p class="hint" style="margin-bottom:10px">Un montant par prestation pour suivre la rentabilité. La cliente règle le total en une fois.</p>
+    <table><thead><tr><th>Prestation</th><th>Réalisée</th><th style="text-align:right">Montant (€)</th></tr></thead><tbody>
+    ${(d.lignes||[]).map((L,i)=>{const so=db.soins.find(x=>x.id===L.soinId);
+      return`<tr><td>${esc(so?so.designation:'—')}</td>
+      <td>${L.fait?'<span class="badge ok">✓</span>':'<span class="badge warn">non cochée</span>'}</td>
+      <td style="text-align:right"><input type="text" inputmode="decimal" name="montant_${i}" value="${esc(prixDefaut(L))}" style="max-width:110px;text-align:right" ${d.offert?'disabled':''}></td></tr>`;}).join('')}
+    </tbody></table>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><h2 style="margin:0">Total : ${eur(total)}</h2></div>
+    <hr class="sep">
     <div class="grid3">
-      <div><label>Montant (€)</label><input type="number" step="0.01" name="rdvMontant" value="${d.montant!==''?esc(d.montant):(soin?soin.prix:'')}"></div>
       <div><label>Mode de paiement</label><select name="rdvPaiement">${MODES.map(m=>`<option ${m===d.paiement?'selected':''}>${m}</option>`).join('')}</select></div>
-      <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="rdvOffert" ${d.offert?'checked':''}> Prestation offerte</label></div></div>
-    <hr class="sep"><p class="hint">En validant : la prestation est enregistrée, une fiche de suivi est créée avec l'état du jour, les observations et les conseils${d.ficheConseils?', plus une fiche de conseils imprimable':''}.</p></div>`;
+      <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="rdvOffert" ${d.offert?'checked':''}> Séance offerte</label></div>
+      <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer la fiche conseil</label></div></div>
+    <p class="hint" style="margin-top:12px">En validant : ${(d.lignes||[]).length} prestation(s) enregistrée(s) dans l’historique, votre ressenti et les produits utilisés conservés sur la séance${d.ficheConseils?', et une fiche conseil créée pour la cliente':''}. La facture reste à émettre dans Indy.</p></div>`;
   }
   return`<div class="row" style="justify-content:space-between;margin-bottom:6px">
     <button class="btn ghost sm" data-act="rdvQuit">✕ Quitter le mode séance</button></div>
-  <h1>Séance guidée — ${esc(C.name(c))}</h1>
+  <h1>Suivi séance — ${esc(C.name(c))}</h1>
   <div class="row" style="margin:10px 0 16px">${dots}</div>
   ${bandeauAlertes(c)}
   ${body}
@@ -1493,29 +1557,48 @@ document.addEventListener('click',async(e)=>{
       saveLocal();state.clientId=null;render();toast('Fiche supprimée définitivement');},
     rgpdExport(){const c=C.get(id);const data={cliente:c,seances:db.seances.filter(s=>s.clientId===id),ventes:db.ventes.filter(v=>v.clientId===id),fiches:db.fiches.filter(f=>f.clientId===id),factures:db.factures.filter(f=>f.clientId===id)};
       const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download=`donnees-${norm(C.name(c)).replace(/ /g,'-')}.json`;a.click();toast('Données de la cliente exportées');},
-    delSeance(){db.seances=db.seances.filter(s=>s.id!==id);saveLocal();render();},
+    delSeance(){const se=db.seances.find(x=>x.id===id);const sid=se?se.sessionId:'';
+      db.seances=db.seances.filter(s=>s.id!==id);
+      if(sid){const reste=db.seances.filter(s=>s.sessionId===sid);
+        const ses=db.sessions.find(x=>x.id===sid);
+        if(!reste.length)db.sessions=db.sessions.filter(x=>x.id!==sid);
+        else if(ses)ses.total=reste.reduce((t,x)=>t+(+x.montant||0),0);}
+      saveLocal();render();},
     doneSeance(){const se=db.seances.find(x=>x.id===id);if(!se)return;
       const m=prompt('Rendez-vous réalisé ✓ — mode de paiement ?\n'+MODES.join(' · ')+'\n(laissez vide si offert)','Espèces');
       if(m===null)return;se.prevu=false;if(m.trim()){se.paiement=m.trim();}else{se.offert=true;se.montant=0;}
       saveLocal();render();toast('Prestation confirmée');},
-    prepRdv(){state.view='clients';state.clientId=id;state.rdvQuestEdit=false;state.rdv={clientId:id,step:0,data:{etat:'',obs:'',conseils:'',soinId:db.soins[0]?db.soins[0].id:'',montant:'',paiement:MODES[0],offert:false,ficheConseils:false}};render();},
+    prepRdv(){state.view='clients';state.clientId=id;state.rdvQuestEdit=false;
+      state.rdv={clientId:id,step:0,data:{etat:'',obs:'',produits:'',conseils:'',
+        lignes:[{soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''}],
+        paiement:MODES[0],offert:false,ficheConseils:true}};render();},
+    rdvAddLigne(){rdvCollect();state.rdv.data.lignes.push({soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''});render();},
+    rdvDelLigne(){rdvCollect();const i=+el.dataset.i;if(state.rdv.data.lignes.length>1)state.rdv.data.lignes.splice(i,1);render();},
+    rdvToggleFait(){rdvCollect();const i=+el.dataset.i;const L=state.rdv.data.lignes[i];L.fait=!L.fait;render();},
     rdvQuestMode(){state.rdvQuestEdit=el.dataset.mode==='edition';render();},
-    rdvQuit(){if(confirm('Quitter la séance guidée ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
+    rdvQuit(){if(confirm('Quitter le suivi de séance ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
     rdvPrev(){rdvCollect();if(state.rdv.step>0)state.rdv.step--;render();},
     rdvNext(){rdvCollect();if(state.rdv.step<RDV_STEPS.length-1)state.rdv.step++;render();},
     rdvSave(){rdvCollect();const r=state.rdv;const c=C.get(r.clientId);const d=r.data;
-      const soin=db.soins.find(x=>x.id===d.soinId);
-      const notes=[d.etat&&('État du jour : '+d.etat),d.obs&&('Observations : '+d.obs)].filter(Boolean).join(' — ').slice(0,300);
-      db.seances.push({id:uid('se'),clientId:c.id,date:today(),soinId:d.soinId,designation:soin?soin.designation:'Soin',duree:soin?soin.duree:'',montant:d.offert?0:+d.montant||0,paiement:d.offert?'':d.paiement,offert:!!d.offert,notes});
-      const fs={id:uid('f'),clientId:c.id,type:'suivi',date:today(),titre:'Séance du '+new Date().toLocaleDateString('fr-FR'),sections:[
-        {titre:'Évolution depuis la dernière séance',texte:d.etat||''},
-        {titre:'Ressentis exprimés',texte:d.obs||''},
-        {titre:'Ajustements proposés',texte:d.conseils||''},
-        {titre:'Prochaine étape',texte:''}]};
-      db.fiches.push(fs);
-      if(d.ficheConseils&&d.conseils){db.fiches.push({id:uid('f'),clientId:c.id,type:'conseils',date:today(),titre:'Conseils du '+new Date().toLocaleDateString('fr-FR'),sections:FICHE_TPL.conseils.map(([t])=>({titre:t,texte:t==='Autres recommandations'?d.conseils:''}))});}
-      state.rdv=null;state.tab='fiches';saveLocal();render();
-      toast('Séance enregistrée ✓ prestation + fiche de suivi créées');},
+      const lignes=(d.lignes||[]).filter(L=>L.soinId);
+      if(!lignes.length)return toast('Aucune prestation à enregistrer',true);
+      const nonFaites=lignes.filter(L=>!L.fait).length;
+      if(nonFaites&&!confirm(nonFaites+' prestation(s) ne sont pas cochées comme réalisées. Les enregistrer quand même ?'))return;
+      const sid=uid('ses');
+      const total=d.offert?0:lignes.reduce((t,L)=>t+numFR(prixDefaut(L)),0);
+      db.sessions.push({id:sid,clientId:c.id,date:today(),etat:d.etat||'',ressenti:d.obs||'',
+        produits:d.produits||'',conseils:d.conseils||'',paiement:d.offert?'':d.paiement,offert:!!d.offert,total});
+      lignes.forEach((L,i)=>{const so=db.soins.find(x=>x.id===L.soinId);
+        db.seances.push({id:uid('se'),sessionId:sid,clientId:c.id,date:today(),soinId:L.soinId,
+          designation:so?so.designation:'Soin',duree:so?so.duree:'',
+          montant:d.offert?0:numFR(prixDefaut(L)),paiement:d.offert?'':(i===0?d.paiement:''),
+          offert:!!d.offert,fait:!!L.fait,notes:L.note||''});});
+      if(d.ficheConseils&&d.conseils){
+        db.fiches.push({id:uid('f'),clientId:c.id,sessionId:sid,type:'conseils',date:today(),
+          titre:'Conseils du '+new Date().toLocaleDateString('fr-FR'),
+          sections:FICHE_TPL.conseils.map(([t])=>({titre:t,texte:t==='Autres recommandations'?d.conseils:''}))});}
+      state.rdv=null;state.tab='seances';saveLocal();render();
+      toast(lignes.length+' prestation(s) enregistrée(s) · total '+eur(total));},
     delFin(){db.fin=db.fin.filter(f=>f.id!==id);saveLocal();render();},
     dupFixes(){const cur=state.finMois;const[y,m]=cur.split('-').map(Number);const nd=new Date(y,m,1);const next=nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0');
       const fixes=db.fin.filter(f=>f.mois===cur&&f.type==='charge'&&f.nature!=='exceptionnelle');
@@ -1587,6 +1670,7 @@ document.addEventListener('submit',(e)=>{
       db.repEnAttente.splice(+f.dataset.i,1);saveLocal();render();toast('Réponses rattachées à '+C.name(c));},
     saveClient(){const c=C.get(id);Object.assign(c,{prenom:d.prenom,nom:d.nom,naissance:d.naissance,email:d.email,tel:d.tel,statut:d.statut,adresse:d.adresse,cp:d.cp,ville:d.ville,notes:d.notes,nuskin:!!d.nuskin,jolimoi:!!d.jolimoi});
       if(d.consentement&&!c.consentement)c.consentementDate=today();c.consentement=!!d.consentement;
+      c.consentPhoto=!!d.consentPhoto;
       const prevNl=c.newsletter||{};
       if(d.newsletter==='oui')c.newsletter={abonnee:true,statut:'Abonnée (saisie manuelle)',date:prevNl.date||today(),groupes:prevNl.groupes||''};
       else if(d.newsletter==='non')c.newsletter={abonnee:false,statut:'Désabonnée (saisie manuelle)',date:prevNl.date||'',groupes:prevNl.groupes||''};

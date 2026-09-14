@@ -219,7 +219,7 @@ const SEED_SOINS=[
   {id:'s6',designation:'Conseil Beauté',categorie:'Conseil',duree:60,prix:0},
   {id:'s7',designation:'Soin Duo Séréni\u2019Baie',categorie:'Duo',duree:90,prix:110},
 ];
-const DB_DEFAULT={v:3,clients:[],seances:[],sessions:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],equipements:[],fin:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0}};
+const DB_DEFAULT={v:3,clients:[],seances:[],sessions:[],devis:[],ventes:[],fiches:[],factures:[],ateliers:[],cartes:[],soins:[],produits:[],equipements:[],fin:[],settings:{ent:{nom:'InspireB — Betty Noël-Wourms',adresse:'',cp:'50530',ville:'Sartilly-Baie-Bocage',siret:'',email:'',tel:'',mention:'TVA non applicable, art. 293 B du CGI'},gh:{owner:'',repo:'',path:'crm.json',token:''}},counters:{cli:0,fac:0,carte:0,dev:0}};
 let db=structuredClone(DB_DEFAULT);
 const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch(e){return false;}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 function saveLocal(){db.settings.gh.token='';store.set('inspireb_db',JSON.stringify(db));setDirty(true);scheduleAuto();}
@@ -230,7 +230,10 @@ function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:
     delete s.equipementId;});
   db.cartes.forEach(cc=>{if(!Array.isArray(cc.relances))cc.relances=[];});
   db.repEnAttente=db.repEnAttente||[];
-  db.sessions=db.sessions||[];
+  db.sessions=db.sessions||[];db.devis=db.devis||[];
+  db.counters.dev=db.counters.dev||0;
+  db.settings.km=db.settings.km||{tarif:0.40,franchise:0};
+  db.sessions.forEach(x=>{if(x.facturee===undefined)x.facturee=false;if(x.factureIndy===undefined)x.factureIndy='';});
   db.seances.forEach(se=>{if(se.sessionId===undefined)se.sessionId='';});
   db.clients.forEach(c=>{c.rep=c.rep||{};c.repAutre=c.repAutre||{};});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
@@ -376,6 +379,20 @@ function viewDash(){
   <td><span class="clickable" data-act="openClient" data-id="${s.clientId}">${esc(C.name(C.get(s.clientId)))}</span></td>
   <td>${esc(s.designation)}</td>
   <td style="text-align:right"><button class="btn sm soft" data-act="prepRdv" data-id="${s.clientId}">▶ Préparer</button></td></tr>`).join('')}</tbody></table></div>`;})()}
+  ${(()=>{const af=db.sessions.filter(x=>!x.facturee&&!x.offert&&+x.total>0).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  if(!af.length)return'';
+  const tot=af.reduce((t,x)=>t+(+x.total||0),0);
+  return`<div class="card" style="margin-top:18px"><h2>🧾 Séances à facturer dans Indy</h2>
+  <p class="hint" style="margin-bottom:10px">La facture s’émet dans Indy pour garder une numérotation unique. Notez ici son numéro une fois faite.</p>
+  <table><thead><tr><th>Date</th><th>Cliente</th><th>Prestations</th><th style="text-align:right">Montant</th><th></th></tr></thead><tbody>
+  ${af.slice(0,10).map(x=>{const lg=sessionLignes(x.id);const c=C.get(x.clientId);
+    return`<tr><td style="white-space:nowrap">${fdate(x.date)}</td>
+    <td><span class="clickable" data-act="openClient" data-id="${x.clientId}">${esc(c?C.name(c):'—')}</span></td>
+    <td>${lg.map(l=>esc(l.designation)).join(', ')}</td>
+    <td style="text-align:right">${eur(x.total)}</td>
+    <td style="text-align:right"><button class="btn sm soft" data-act="openSeance" data-id="${x.clientId}">Ouvrir</button></td></tr>`;}).join('')}
+  </tbody></table>
+  <p class="hint" style="margin-top:8px">${af.length} séance(s) en attente · ${eur(tot)} au total${af.length>10?' — les 10 plus anciennes sont affichées':''}</p></div>`;})()}
   ${(()=>{const rel=cartesARelancer();
   if(!rel.length){
     const vives=db.cartes.filter(cc=>!carteEpuisee(cc)&&!cartePerimee(cc));
@@ -494,10 +511,10 @@ function viewClientDetail(){
     ${nl?(nl.abonnee?`<span class="badge ok">Newsletter ✓${nl.date?' depuis le '+fdate(nl.date):''}</span>`:'<span class="badge warn">Désabonnée newsletter</span>'):'<span class="badge">Newsletter : inconnu</span>'}
     ${c.consentement?'<span class="badge ok">Consentement RGPD ✓</span>':'<span class="badge warn">Consentement à recueillir</span>'}
   </div>`;
-  const tabs=['infos','seances','ventes','fiches','photos','questionnaire','ateliers','cartes','factures'];
-  const tl={infos:'Infos',seances:'Prestations',ventes:'Achats produits',fiches:'Fiches',photos:'Suivi photos',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
+  const tabs=['infos','seances','devis','ventes','fiches','photos','questionnaire','ateliers','cartes','factures'];
+  const tl={infos:'Infos',seances:'Prestations',devis:'Devis',ventes:'Achats produits',fiches:'Fiches',photos:'Suivi photos',questionnaire:'Questionnaire',ateliers:'Ateliers',cartes:'Cartes cadeaux',factures:'Factures'};
   const nav=`<div class="tabs">${tabs.map(t=>`<button data-act="tab" data-tab="${t}" class="${state.tab===t?'on':''}">${tl[t]}</button>`).join('')}</div>`;
-  return head+bandeauAlertes(c)+nav+({infos:tabInfos,seances:tabSeances,ventes:tabVentes,fiches:tabFiches,photos:tabPhotos,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
+  return head+bandeauAlertes(c)+nav+({infos:tabInfos,seances:tabSeances,devis:tabDevis,ventes:tabVentes,fiches:tabFiches,photos:tabPhotos,questionnaire:tabQuest,ateliers:tabAteliersClient,cartes:tabCartesClient,factures:tabFactures}[state.tab]||tabInfos)(c);
 }
 function tabInfos(c){
   const r=resumeClient(c);
@@ -540,6 +557,65 @@ function tabInfos(c){
   <div style="margin-top:12px"><label>Notes de suivi (préférences, contre-indications, contexte…)</label><textarea name="notes">${esc(c.notes)}</textarea></div>
   <div class="row" style="margin-top:12px"><button class="btn">Enregistrer</button></div></form>`;
 }
+function devisTotal(dv){
+  const pres=(dv.lignes||[]).reduce((t,l)=>t+(+l.qte||1)*(+l.pu||0),0);
+  const km=Math.max(0,(+dv.km||0)-(+dv.franchise||0));
+  const depl=Math.round(km*(+dv.tarifKm||0)*100)/100;
+  const remise=Math.min(+dv.remise||0,pres+depl);
+  return{pres,km,depl,remise,total:Math.round((pres+depl-remise)*100)/100};}
+const DEVIS_STATUTS=['brouillon','envoyé','accepté','refusé'];
+function devisBadge(dv){return{brouillon:'<span class="badge">Brouillon</span>',
+  'envoyé':'<span class="badge warn">Envoyé</span>','accepté':'<span class="badge ok">Accepté</span>',
+  'refusé':'<span class="badge err">Refusé</span>'}[dv.statut]||'';}
+function tabDevis(c){
+  const list=db.devis.filter(x=>x.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const K=db.settings.km;
+  return`<form class="card" data-form="addDevis" data-id="${c.id}"><h2>Nouveau devis</h2>
+  <p class="hint" style="margin-bottom:10px">Pensé pour les prestations à l’extérieur : mariage, séance photo, événement. Les lignes et les frais de déplacement se modifient ensuite.</p>
+  <div class="grid3">
+    <div><label>Date</label><input type="date" name="date" value="${today()}" required></div>
+    <div><label>Valable jusqu’au</label><input type="date" name="validite" value="${new Date(Date.now()+30*864e5).toISOString().slice(0,10)}"></div>
+    <div><label>Objet</label><input name="objet" placeholder="Mise en beauté mariage" required></div>
+  </div>
+  <div class="row" style="margin-top:10px"><button class="btn">Créer le devis</button></div></form>
+  ${list.map(dv=>{const T=devisTotal(dv);
+    return`<div class="card"><div class="row" style="justify-content:space-between">
+    <div><h2 style="margin:0">${esc(dv.num)} — ${esc(dv.objet)}</h2>
+      <p class="hint">Du ${fdate(dv.date)}${dv.validite?` · valable jusqu’au ${fdate(dv.validite)}`:''} ${devisBadge(dv)}</p></div>
+    <div class="row">
+      <button class="btn sm soft" data-act="printDevis" data-id="${dv.id}">Imprimer / PDF</button>
+      <button class="btn sm soft" data-act="mailDevis" data-id="${dv.id}">✉ Envoyer</button>
+      <button class="btn sm danger" data-act="delDevis" data-id="${dv.id}">✕</button></div></div>
+    <table><thead><tr><th>Désignation</th><th style="width:70px">Qté</th><th style="width:110px;text-align:right">P.U. (€)</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>
+    ${(dv.lignes||[]).map((l,i)=>`<tr><td>${esc(l.designation)}</td><td>${l.qte||1}</td>
+      <td style="text-align:right">${eur(l.pu)}</td><td style="text-align:right">${eur((+l.qte||1)*(+l.pu||0))}</td>
+      <td style="text-align:right"><button class="btn sm danger" data-act="delLigneDevis" data-id="${dv.id}" data-i="${i}">✕</button></td></tr>`).join('')
+      ||'<tr><td colspan="5"><span class="hint">Aucune ligne. Ajoutez la prestation ci-dessous.</span></td></tr>'}
+    </tbody></table>
+    <form class="row" data-form="addLigneDevis" data-id="${dv.id}" style="margin-top:8px;align-items:flex-end;gap:6px">
+      <div style="flex:2;min-width:180px"><label>Désignation</label>
+        <input name="designation" list="soinsList" placeholder="Mise en beauté, essai, retouche…" required></div>
+      <div><label>Qté</label><input type="text" inputmode="decimal" name="qte" value="1" style="max-width:70px"></div>
+      <div><label>P.U. (€)</label><input type="text" inputmode="decimal" name="pu" required style="max-width:100px"></div>
+      <button class="btn sm">+ Ajouter</button></form>
+    <hr class="sep">
+    <form class="row" data-form="majDevis" data-id="${dv.id}" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
+      <div><label>Distance aller-retour (km)</label><input type="text" inputmode="decimal" name="km" value="${esc(dv.km||'')}" style="max-width:110px"></div>
+      <div><label>Tarif au km (€)</label><input type="text" inputmode="decimal" name="tarifKm" value="${esc(dv.tarifKm!==undefined?dv.tarifKm:K.tarif)}" style="max-width:110px"></div>
+      <div><label>Km offerts</label><input type="text" inputmode="decimal" name="franchise" value="${esc(dv.franchise||0)}" style="max-width:100px"></div>
+      <div><label>Remise (€)</label><input type="text" inputmode="decimal" name="remise" value="${esc(dv.remise||'')}" style="max-width:100px"></div>
+      <div><label>Statut</label><select name="statut" style="max-width:130px">${DEVIS_STATUTS.map(x=>`<option ${x===dv.statut?'selected':''}>${x}</option>`).join('')}</select></div>
+      <button class="btn sm soft">Enregistrer</button></form>
+    <div style="text-align:right;margin-top:12px">
+      <p style="margin:2px 0">Prestations : ${eur(T.pres)}</p>
+      ${T.depl>0?`<p style="margin:2px 0">Déplacement : ${T.km} km × ${eur(dv.tarifKm!==undefined?dv.tarifKm:K.tarif)} = ${eur(T.depl)}</p>`:''}
+      ${T.remise>0?`<p style="margin:2px 0;color:var(--rust)">Remise : − ${eur(T.remise)}</p>`:''}
+      <h2 style="margin:6px 0 0">Total : ${eur(T.total)}</h2></div>
+    ${dv.statut==='accepté'?`<div class="row" style="margin-top:10px"><button class="btn sm" data-act="devisEnPresta" data-id="${dv.id}">→ Enregistrer en prestations réalisées</button></div>`:''}
+    <div style="margin-top:10px"><label>Notes internes</label>
+      <textarea data-act="noteDevis" data-id="${dv.id}" rows="2" placeholder="Lieu, horaire, nombre de personnes, contraintes…">${esc(dv.notes||'')}</textarea></div>
+    </div>`;}).join('')||'<div class="card"><p class="hint">Aucun devis pour cette cliente.</p></div>'}
+  <datalist id="soinsList">${db.soins.map(x=>`<option value="${esc(x.designation)}">`).join('')}</datalist>`;}
 function tabPhotos(c){
   const sessions=db.sessions.filter(x=>x.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   return`<div class="card"><h2>Suivi photos</h2>
@@ -591,7 +667,12 @@ function tabSeances(c){
     <table><tbody>${lg.map(ligne).join('')}</tbody></table>
     ${ses.produits?`<p style="margin-top:8px"><strong>Produits utilisés :</strong> ${esc(ses.produits)}</p>`:''}
     ${ses.ressenti?`<p style="margin-top:4px"><strong>Mon ressenti :</strong> ${esc(ses.ressenti)}</p>`:''}
-    ${ses.etat?`<p class="hint" style="margin-top:4px">État déclaré à l’accueil : ${esc(ses.etat)}</p>`:''}</div>`;};
+    ${ses.etat?`<p class="hint" style="margin-top:4px">État déclaré à l’accueil : ${esc(ses.etat)}</p>`:''}
+    ${ses.offert||ses.total<=0?'':`<form class="row" data-form="majFactIndy" data-id="${ses.id}" style="margin-top:10px;align-items:flex-end;gap:8px">
+      <label class="check"><input type="checkbox" name="facturee" ${ses.facturee?'checked':''}> Facturé dans Indy</label>
+      <div><label>N° de facture Indy</label><input name="factureIndy" value="${esc(ses.factureIndy||'')}" placeholder="ex. 2026-042" style="max-width:150px"></div>
+      <button class="btn sm soft">Enregistrer</button>
+      ${ses.facturee?'':'<span class="badge warn">à facturer</span>'}</form>`}</div>`;};
   return`<form class="card" data-form="addSeance" data-id="${c.id}"><h2>Ajouter une prestation isolée</h2>
   <div class="grid4">
     <div><label>Date</label><input type="date" name="date" value="${today()}" required></div>
@@ -638,6 +719,7 @@ function tabFiches(c){
     <div><strong>${ficheLabel(f.type)}</strong> — ${esc(f.titre)}<br><span class="hint">${fdate(f.date)}</span></div>
     <div class="row"><button class="btn sm ghost" data-act="editFiche" data-id="${f.id}">Modifier</button>
     <button class="btn sm soft" data-act="printFiche" data-id="${f.id}">Imprimer / PDF</button>
+    <button class="btn sm soft" data-act="mailFiche" data-id="${f.id}">✉ Envoyer par mail</button>
     <button class="btn sm danger" data-act="delFiche" data-id="${f.id}">✕</button></div></div></div>`).join('')
   :'<p class="hint">Aucune fiche pour l’instant.</p>'}</div>`;
 }
@@ -656,7 +738,11 @@ function tabFactures(c){
   const list=db.factures.filter(f=>f.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const items=[...db.seances.filter(s=>s.clientId===c.id&&!s.offert&&+s.montant>0).map(s=>({k:'S'+s.id,label:fdate(s.date)+' — '+s.designation,montant:+s.montant})),
                ...db.ventes.filter(v=>v.clientId===c.id).map(v=>({k:'V'+v.id,label:fdate(v.date)+' — '+v.designation+(v.qte>1?' ×'+v.qte:''),montant:+v.montant}))];
-  return`<form class="card" data-form="addFacture" data-id="${c.id}"><h2>Créer une facture</h2>
+  return`<div class="card" style="border-left:4px solid var(--gold)">
+  <h2>⚠ La facturation se fait désormais dans Indy</h2>
+  <p>Une numérotation unique et continue est obligatoire : deux logiciels qui numérotent en parallèle créent des trous ou des doublons. Et à partir du 1er septembre 2027, la transmission des données de vente passera par une plateforme agréée, ce que ce CRM ne sera jamais.</p>
+  <p class="hint">Le module ci-dessous reste accessible pour consulter et réimprimer les factures déjà émises ici. Pour les nouvelles, passez par Indy et notez le numéro sur la séance, dans l’onglet Prestations.</p></div>
+  <form class="card" data-form="addFacture" data-id="${c.id}"><h2>Créer une facture (ancien module)</h2>
   <p class="hint" style="margin-bottom:8px">Cochez les éléments à facturer, ou ajoutez une ligne libre.</p>
   ${items.length?items.map(i=>`<label class="check" style="margin-bottom:6px"><input type="checkbox" name="item" value="${i.k}"> ${esc(i.label)} — ${eur(i.montant)}</label>`).join(''):'<p class="hint">Aucune prestation ou vente à facturer.</p>'}
   <div class="grid3" style="margin-top:10px">
@@ -1494,8 +1580,15 @@ function viewEnAttente(){
 
 /* ═════════ RÉGLAGES ═════════ */
 function viewParams(){
-  const e=db.settings.ent,g=db.settings.gh;
+  const e=db.settings.ent,g=db.settings.gh,K=db.settings.km;
   return`<h1>Réglages</h1><p class="sub">Entreprise, sauvegarde et synchronisation</p>
+  <form class="card" data-form="saveKm"><h2>Frais de déplacement</h2>
+  <p class="hint" style="margin-bottom:10px">Valeurs proposées par défaut sur les nouveaux devis, modifiables au cas par cas. Le barème kilométrique officiel évolue chaque année : vérifiez le vôtre sur impots.gouv.fr.</p>
+  <div class="grid3">
+    <div><label>Tarif au kilomètre (€)</label><input type="text" inputmode="decimal" name="tarif" value="${esc(K.tarif)}"></div>
+    <div><label>Kilomètres offerts</label><input type="text" inputmode="decimal" name="franchise" value="${esc(K.franchise||0)}"></div>
+  </div>
+  <div class="row" style="margin-top:10px"><button class="btn">Enregistrer</button></div></form>
   <form class="card" data-form="saveEnt"><h2>Mon entreprise (en-têtes de factures et fiches)</h2>
   <div class="grid3">
     <div><label>Nom / raison sociale</label><input name="nom" value="${esc(e.nom)}"></div>
@@ -1552,6 +1645,22 @@ function printFacture(f){
   <p style="font-size:11.5px;color:#555">${esc(e.mention)}</p>
   <div class="pf">${esc(e.nom)}${e.siret?' — SIRET '+esc(e.siret):''} — ${esc(e.cp)} ${esc(e.ville)}</div>`);
 }
+function printDevis(dv){
+  const c=C.get(dv.clientId);const e=db.settings.ent;const T=devisTotal(dv);
+  doPrint(`${printHead()}<h1>Devis ${esc(dv.num)}</h1>
+  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">
+    <div>Date : ${fdate(dv.date)}${dv.validite?'<br>Valable jusqu’au : '+fdate(dv.validite):''}<br>Objet : ${esc(dv.objet)}</div>
+    <div style="text-align:right"><strong>Établi pour</strong><br>${esc(C.name(c))}${c&&c.adresse?'<br>'+esc(c.adresse):''}${c&&((c.cp||'')+(c.ville||''))?'<br>'+esc(((c.cp||'')+' '+(c.ville||'')).trim()):''}</div></div>
+  <table><thead><tr><th>Désignation</th><th style="text-align:right">Qté</th><th style="text-align:right">P.U.</th><th style="text-align:right">Total</th></tr></thead><tbody>
+  ${(dv.lignes||[]).map(l=>`<tr><td>${esc(l.designation)}</td><td style="text-align:right">${l.qte||1}</td><td style="text-align:right">${eur(l.pu)}</td><td style="text-align:right">${eur((+l.qte||1)*(+l.pu||0))}</td></tr>`).join('')}
+  ${T.depl>0?`<tr><td>Frais de déplacement (${T.km} km)</td><td style="text-align:right">1</td><td style="text-align:right">${eur(T.depl)}</td><td style="text-align:right">${eur(T.depl)}</td></tr>`:''}
+  ${T.remise>0?`<tr><td colspan="3" style="text-align:right">Remise</td><td style="text-align:right">− ${eur(T.remise)}</td></tr>`:''}
+  <tr><td colspan="3" style="text-align:right;font-weight:600">Total</td><td style="text-align:right;font-weight:600">${eur(T.total)}</td></tr></tbody></table>
+  <p style="font-size:11.5px;color:#555">${esc(e.mention)}</p>
+  <p style="font-size:11.5px;color:#555">Devis gratuit et sans engagement. Bon pour accord, date et signature :</p>
+  <div style="height:70px;border:1px solid #ddd;border-radius:6px;margin-top:6px"></div>
+  <div class="pf">${esc(e.nom)}${e.siret?' — SIRET '+esc(e.siret):''} — ${esc(e.cp)} ${esc(e.ville)}</div>`);
+}
 function printCarte(cc){
   const dela=cc.acheteuseId?C.name(C.get(cc.acheteuseId)):(cc.acheteuseNom||'');
   $('#printArea').innerHTML=`<div class="ccadeau2"><img class="bg" src="${CARTE_BG}" alt="Carte cadeau InspireB">
@@ -1584,6 +1693,41 @@ document.addEventListener('click',async(e)=>{
     delLegacyQuest(){const c=C.get(id);if(!c)return;
       if(!confirm('Supprimer l’ancien import brut ? Les champs structurés ne sont pas touchés.'))return;
       delete c.questionnaire;delete c.questionnaireDate;saveLocal();render();toast('Ancien import supprimé');},
+    delDevis(){if(!confirm('Supprimer ce devis ?'))return;db.devis=db.devis.filter(x=>x.id!==id);saveLocal();render();},
+    delLigneDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;dv.lignes.splice(+el.dataset.i,1);saveLocal();render();},
+    printDevis(){const dv=db.devis.find(x=>x.id===id);if(dv)printDevis(dv);},
+    mailDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;const c=C.get(dv.clientId);
+      if(!c||!c.email)return toast('Aucune adresse email sur la fiche cliente',true);
+      const T=devisTotal(dv);
+      const corps=[`Bonjour ${c.prenom||C.name(c)},`,'',
+        `Voici le devis ${dv.num} pour ${dv.objet}.`,'',
+        ...(dv.lignes||[]).map(l=>`- ${l.designation} : ${(+l.qte||1)>1?(l.qte+' × '):''}${eur(l.pu)}`),
+        T.depl>0?`- Déplacement (${T.km} km) : ${eur(T.depl)}`:'',
+        T.remise>0?`- Remise : − ${eur(T.remise)}`:'',
+        '',`Total : ${eur(T.total)}`,
+        dv.validite?`Devis valable jusqu’au ${fdate(dv.validite)}.`:'','',
+        'Je reste à votre disposition.','',db.settings.ent.nom||'InspireB'].filter(x=>x!=='').join('\n');
+      window.location.href='mailto:'+encodeURIComponent(c.email)+'?subject='+encodeURIComponent('Devis '+dv.num+' — '+dv.objet)+'&body='+encodeURIComponent(corps);
+      if(dv.statut==='brouillon'){dv.statut='envoyé';saveLocal();render();}},
+    devisEnPresta(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
+      if(!(dv.lignes||[]).length)return toast('Ce devis n’a aucune ligne',true);
+      if(!confirm('Enregistrer les lignes de ce devis comme prestations réalisées aujourd’hui ?'))return;
+      const T=devisTotal(dv);const sid=uid('ses');
+      db.sessions.push({id:sid,clientId:dv.clientId,date:today(),etat:'',ressenti:'',produits:'',
+        conseils:'',paiement:MODES[0],offert:false,sousTotal:T.pres+T.depl,remise:T.remise,
+        remiseMotif:dv.remise>0?'Remise du devis '+dv.num:'',total:T.total,facturee:false,factureIndy:''});
+      const ratio=(T.pres+T.depl)?T.total/(T.pres+T.depl):1;
+      const items=[...(dv.lignes||[]).map(l=>({d:l.designation,m:(+l.qte||1)*(+l.pu||0)}))];
+      if(T.depl>0)items.push({d:'Frais de déplacement ('+T.km+' km)',m:T.depl});
+      let cumul=0;
+      items.forEach((it,i)=>{let net=Math.round(it.m*ratio*100)/100;
+        if(i===items.length-1)net=Math.round((T.total-cumul)*100)/100;cumul+=net;
+        db.seances.push({id:uid('se'),sessionId:sid,clientId:dv.clientId,date:today(),soinId:'',
+          designation:it.d,duree:'',montant:net,montantBrut:it.m,paiement:i===0?MODES[0]:'',
+          offert:false,fait:true,notes:'Devis '+dv.num});});
+      dv.statut='accepté';dv.converti=today();
+      state.tab='seances';saveLocal();render();toast('Prestations créées depuis '+dv.num);},
+    openSeance(){state.view='clients';state.clientId=id;state.tab='seances';render();},
     goAteliers(){state.view='ateliers';state.clientId=null;render();},
     goCartes(){state.view='cartes';state.clientId=null;render();},
     goCarte(){state.view='cartes';state.clientId=null;state.highlightCarte=id;render();
@@ -1620,6 +1764,22 @@ document.addEventListener('click',async(e)=>{
     rdvAddLigne(){rdvCollect();state.rdv.data.lignes.push({soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''});render();},
     rdvDelLigne(){rdvCollect();const i=+el.dataset.i;if(state.rdv.data.lignes.length>1)state.rdv.data.lignes.splice(i,1);render();},
     rdvToggleFait(){rdvCollect();const i=+el.dataset.i;const L=state.rdv.data.lignes[i];L.fait=!L.fait;render();},
+    saveKm(){db.settings.km={tarif:numFR(d.tarif),franchise:numFR(d.franchise)};
+      saveLocal();render();toast('Frais de déplacement enregistrés');},
+    addDevis(){db.counters.dev=(db.counters.dev||0)+1;
+      const num='D'+new Date().getFullYear()+'-'+String(db.counters.dev).padStart(3,'0');
+      db.devis.push({id:uid('dv'),num,clientId:id,date:d.date,validite:d.validite||'',objet:d.objet,
+        lignes:[],km:'',tarifKm:db.settings.km.tarif,franchise:0,remise:'',statut:'brouillon',notes:''});
+      saveLocal();render();toast('Devis '+num+' créé');},
+    addLigneDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
+      dv.lignes.push({designation:d.designation,qte:numFR(d.qte)||1,pu:numFR(d.pu)});saveLocal();render();},
+    majDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
+      Object.assign(dv,{km:numFR(d.km),tarifKm:numFR(d.tarifKm),franchise:numFR(d.franchise),
+        remise:numFR(d.remise),statut:d.statut});
+      saveLocal();render();toast('Devis mis à jour');},
+    majFactIndy(){const ses=db.sessions.find(x=>x.id===id);if(!ses)return;
+      ses.facturee=!!d.facturee;ses.factureIndy=(d.factureIndy||'').trim();
+      saveLocal();render();toast(ses.facturee?'Séance marquée facturée':'Suivi de facturation mis à jour');},
     rdvQuestMode(){state.rdvQuestEdit=el.dataset.mode==='edition';render();},
     rdvQuit(){if(confirm('Quitter le suivi de séance ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
     rdvPrev(){rdvCollect();if(state.rdv.step>0)state.rdv.step--;render();},
@@ -1658,6 +1818,16 @@ document.addEventListener('click',async(e)=>{
     closeFiche(){state.ficheEdit=null;render();},
     delFiche(){if(confirm('Supprimer cette fiche ?')){db.fiches=db.fiches.filter(f=>f.id!==id);state.ficheEdit=null;saveLocal();render();}},
     printFiche(){const f=db.fiches.find(x=>x.id===id);if(f)printFiche(f);},
+    mailFiche(){const f=db.fiches.find(x=>x.id===id);if(!f)return;
+      const c=C.get(f.clientId);
+      if(!c||!c.email)return toast('Aucune adresse email sur la fiche cliente',true);
+      const corps=[`Bonjour ${c.prenom||C.name(c)},`,'',
+        'Merci pour ce moment passé ensemble. Voici les conseils de votre séance.','',
+        ...f.sections.filter(sec=>(sec.texte||'').trim()).map(sec=>sec.titre.toUpperCase()+'\n'+sec.texte),
+        '','Prenez soin de vous,',db.settings.ent.nom||'InspireB'].join('\n');
+      const url='mailto:'+encodeURIComponent(c.email)+'?subject='+encodeURIComponent(f.titre||'Vos conseils InspireB')+'&body='+encodeURIComponent(corps);
+      if(url.length>1900)toast('Fiche longue : le mail peut être tronqué, préférez le PDF en pièce jointe',true);
+      window.location.href=url;},
     printFacture(){const f=db.factures.find(x=>x.id===id);if(f)printFacture(f);},
     payFacture(){const f=db.factures.find(x=>x.id===id);if(f){const m=prompt('Mode de paiement ?\n'+MODES.join(' · '),'Carte bancaire');if(m){f.payee=true;f.paiement=m;saveLocal();render();}}},
     delFacture(){if(confirm('Supprimer cette facture ? (attention à la continuité de votre numérotation)')){db.factures=db.factures.filter(f=>f.id!==id);saveLocal();render();}},
@@ -1822,6 +1992,10 @@ document.addEventListener('change',async(e)=>{
 
 document.addEventListener('change',(e)=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.act==='noteDevis'){
+    const dv=db.devis.find(x=>x.id===t.dataset.id);
+    if(dv){dv.notes=t.value;saveLocal();toast('Note enregistrée');}
+  }
   if(t.dataset&&t.dataset.act==='avisPart'){
     const a=db.ateliers.find(x=>x.id===t.dataset.id);
     if(a&&a.participants[+t.dataset.i]){a.participants[+t.dataset.i].avis=t.value;saveLocal();toast('Retour enregistré');}

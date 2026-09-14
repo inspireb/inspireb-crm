@@ -234,6 +234,8 @@ function normalizeDb(){db.fin=db.fin||[];db.settings.fin=db.settings.fin||{taux:
   db.counters.dev=db.counters.dev||0;
   db.settings.km=db.settings.km||{tarif:0.40,franchise:0};
   db.sessions.forEach(x=>{if(x.facturee===undefined)x.facturee=false;if(x.factureIndy===undefined)x.factureIndy='';});
+  db.sessions=db.sessions.filter(x=>db.seances.some(se=>se.sessionId===x.id));
+  db.seances.forEach(se=>{if(se.sessionId&&!db.sessions.some(x=>x.id===se.sessionId))se.sessionId='';});
   db.seances.forEach(se=>{if(se.sessionId===undefined)se.sessionId='';});
   db.clients.forEach(c=>{c.rep=c.rep||{};c.repAutre=c.repAutre||{};});}
 function loadLocal(){const raw=store.get('inspireb_db');if(raw){try{db=Object.assign(structuredClone(DB_DEFAULT),JSON.parse(raw));}catch(e){}}if(!db.soins.length)db.soins=structuredClone(SEED_SOINS);normalizeDb();}
@@ -662,7 +664,7 @@ function tabSeances(c){
   const blocSession=(ses)=>{const lg=sessionLignes(ses.id);
     return`<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between">
       <h3 style="margin:0">Séance du ${fdate(ses.date)} — ${lg.length} prestation${lg.length>1?'s':''}</h3>
-      <div style="text-align:right"><strong>${ses.offert?'Offerte':eur(ses.total)}</strong>${ses.paiement?` <span class="hint">${esc(ses.paiement)}</span>`:''}
+      <div style="text-align:right"><button class="btn sm danger" data-act="delSession" data-id="${ses.id}" style="float:right;margin-left:8px">✕ Séance</button><strong>${ses.offert?'Offerte':eur(ses.total)}</strong>${ses.paiement?` <span class="hint">${esc(ses.paiement)}</span>`:''}
       ${ses.remise>0?`<br><span class="hint">Sous-total ${eur(ses.sousTotal)} · remise ${eur(ses.remise)}${ses.remiseMotif?' ('+esc(ses.remiseMotif)+')':''}</span>`:''}</div></div>
     <table><tbody>${lg.map(ligne).join('')}</tbody></table>
     ${ses.produits?`<p style="margin-top:8px"><strong>Produits utilisés :</strong> ${esc(ses.produits)}</p>`:''}
@@ -683,10 +685,10 @@ function tabSeances(c){
   <div class="row" style="margin-top:10px"><label class="check"><input type="checkbox" name="offert"> Prestation offerte</label>
   <input name="notes" placeholder="Note rapide (facultatif)" style="flex:1;min-width:180px"><button class="btn">Ajouter</button></div>
   <p class="hint" style="margin-top:8px">Pour une séance complète avec ressenti et fiche conseil, utilisez plutôt le bouton Suivi séance en haut de la fiche.</p></form>
-  <div class="card"><h2>Historique — ${list.length} prestation${list.length>1?'s':''}</h2>
-  ${!list.length?'<p class="hint">Aucune prestation enregistrée.</p>':''}</div>
+  ${!list.length?'<div class="card"><h2>Historique</h2><p class="hint">Aucune prestation enregistrée.</p></div>':
+    `<div class="card"><h2>Historique — ${list.length} prestation${list.length>1?'s':''} sur ${sessions.length} séance${sessions.length>1?'s':''}${isolees.length?` + ${isolees.length} isolée${isolees.length>1?'s':''}`:''}</h2></div>`}
   ${sessions.map(blocSession).join('')}
-  ${isolees.length?`<div class="card"><h3 style="margin-top:0">Prestations isolées</h3>
+  ${isolees.length?`<div class="card"><h3 style="margin-top:0">Prestations isolées — ${isolees.length}</h3>
   <table><thead><tr><th>Date</th><th>Soin</th><th>Paiement</th><th style="text-align:right">Montant</th><th></th></tr></thead>
   <tbody>${isolees.map(ligne).join('')}</tbody></table></div>`:''}`;
 }
@@ -1727,6 +1729,12 @@ document.addEventListener('click',async(e)=>{
           offert:false,fait:true,notes:'Devis '+dv.num});});
       dv.statut='accepté';dv.converti=today();
       state.tab='seances';saveLocal();render();toast('Prestations créées depuis '+dv.num);},
+    delSession(){const ses=db.sessions.find(x=>x.id===id);if(!ses)return;
+      const nb=sessionLignes(id).length;
+      if(!confirm('Supprimer toute la séance du '+fdate(ses.date)+' et ses '+nb+' prestation(s) ?'))return;
+      db.seances=db.seances.filter(se=>se.sessionId!==id);
+      db.sessions=db.sessions.filter(x=>x.id!==id);
+      saveLocal();render();toast('Séance supprimée');},
     openSeance(){state.view='clients';state.clientId=id;state.tab='seances';render();},
     goAteliers(){state.view='ateliers';state.clientId=null;render();},
     goCartes(){state.view='cartes';state.clientId=null;render();},

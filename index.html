@@ -1764,22 +1764,6 @@ document.addEventListener('click',async(e)=>{
     rdvAddLigne(){rdvCollect();state.rdv.data.lignes.push({soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''});render();},
     rdvDelLigne(){rdvCollect();const i=+el.dataset.i;if(state.rdv.data.lignes.length>1)state.rdv.data.lignes.splice(i,1);render();},
     rdvToggleFait(){rdvCollect();const i=+el.dataset.i;const L=state.rdv.data.lignes[i];L.fait=!L.fait;render();},
-    saveKm(){db.settings.km={tarif:numFR(d.tarif),franchise:numFR(d.franchise)};
-      saveLocal();render();toast('Frais de déplacement enregistrés');},
-    addDevis(){db.counters.dev=(db.counters.dev||0)+1;
-      const num='D'+new Date().getFullYear()+'-'+String(db.counters.dev).padStart(3,'0');
-      db.devis.push({id:uid('dv'),num,clientId:id,date:d.date,validite:d.validite||'',objet:d.objet,
-        lignes:[],km:'',tarifKm:db.settings.km.tarif,franchise:0,remise:'',statut:'brouillon',notes:''});
-      saveLocal();render();toast('Devis '+num+' créé');},
-    addLigneDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
-      dv.lignes.push({designation:d.designation,qte:numFR(d.qte)||1,pu:numFR(d.pu)});saveLocal();render();},
-    majDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
-      Object.assign(dv,{km:numFR(d.km),tarifKm:numFR(d.tarifKm),franchise:numFR(d.franchise),
-        remise:numFR(d.remise),statut:d.statut});
-      saveLocal();render();toast('Devis mis à jour');},
-    majFactIndy(){const ses=db.sessions.find(x=>x.id===id);if(!ses)return;
-      ses.facturee=!!d.facturee;ses.factureIndy=(d.factureIndy||'').trim();
-      saveLocal();render();toast(ses.facturee?'Séance marquée facturée':'Suivi de facturation mis à jour');},
     rdvQuestMode(){state.rdvQuestEdit=el.dataset.mode==='edition';render();},
     rdvQuit(){if(confirm('Quitter le suivi de séance ? Les notes non enregistrées seront perdues.')){state.rdv=null;render();}},
     rdvPrev(){rdvCollect();if(state.rdv.step>0)state.rdv.step--;render();},
@@ -1883,6 +1867,22 @@ document.addEventListener('submit',(e)=>{
       const c=C.get(d.clientId);if(!c)return toast('Choisissez une cliente',true);
       appliquerReponses(c,b);completerFiche(c,b);
       db.repEnAttente.splice(+f.dataset.i,1);saveLocal();render();toast('Réponses rattachées à '+C.name(c));},
+    saveKm(){db.settings.km={tarif:numFR(d.tarif),franchise:numFR(d.franchise)};
+      saveLocal();render();toast('Frais de déplacement enregistrés');},
+    addDevis(){db.counters.dev=(db.counters.dev||0)+1;
+      const num='D'+new Date().getFullYear()+'-'+String(db.counters.dev).padStart(3,'0');
+      db.devis.push({id:uid('dv'),num,clientId:id,date:d.date,validite:d.validite||'',objet:d.objet,
+        lignes:[],km:'',tarifKm:db.settings.km.tarif,franchise:0,remise:'',statut:'brouillon',notes:''});
+      saveLocal();render();toast('Devis '+num+' créé');},
+    addLigneDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
+      dv.lignes.push({designation:d.designation,qte:numFR(d.qte)||1,pu:numFR(d.pu)});saveLocal();render();},
+    majDevis(){const dv=db.devis.find(x=>x.id===id);if(!dv)return;
+      Object.assign(dv,{km:numFR(d.km),tarifKm:numFR(d.tarifKm),franchise:numFR(d.franchise),
+        remise:numFR(d.remise),statut:d.statut});
+      saveLocal();render();toast('Devis mis à jour');},
+    majFactIndy(){const ses=db.sessions.find(x=>x.id===id);if(!ses)return;
+      ses.facturee=!!d.facturee;ses.factureIndy=(d.factureIndy||'').trim();
+      saveLocal();render();toast(ses.facturee?'Séance marquée facturée':'Suivi de facturation mis à jour');},
     saveClient(){const c=C.get(id);Object.assign(c,{prenom:d.prenom,nom:d.nom,naissance:d.naissance,email:d.email,tel:d.tel,statut:d.statut,adresse:d.adresse,cp:d.cp,ville:d.ville,notes:d.notes,nuskin:!!d.nuskin,jolimoi:!!d.jolimoi});
       if(d.consentement&&!c.consentement)c.consentementDate=today();c.consentement=!!d.consentement;
       c.consentPhoto=!!d.consentPhoto;

@@ -580,13 +580,14 @@ function tabCartesClient(c){
 }
 function tabSeances(c){
   const list=db.seances.filter(s=>s.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const ligne=(s)=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.fait===false?' <span class="badge warn">non réalisée</span>':''}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.prevu?'<span class="badge warn">À venir</span>':s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}</td><td class="row">${s.prevu?`<button class="btn sm soft" data-act="doneSeance" data-id="${s.id}">✓ Réalisée</button>`:''}<button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`;
+  const ligne=(s)=>`<tr><td>${fdate(s.date)}</td><td>${esc(s.designation)}${s.fait===false?' <span class="badge warn">non réalisée</span>':''}${s.notes?`<br><span class="hint">${esc(s.notes)}</span>`:''}</td><td>${s.prevu?'<span class="badge warn">À venir</span>':s.offert?'<span class="badge ok">Offerte</span>':esc(s.paiement||'—')}</td><td style="text-align:right">${s.offert?'—':eur(s.montant)}${s.montantBrut&&s.montantBrut>s.montant?`<br><span class="hint" style="text-decoration:line-through">${eur(s.montantBrut)}</span>`:''}</td><td class="row">${s.prevu?`<button class="btn sm soft" data-act="doneSeance" data-id="${s.id}">✓ Réalisée</button>`:''}<button class="btn danger sm" data-act="delSeance" data-id="${s.id}">✕</button></td></tr>`;
   const sessions=db.sessions.filter(x=>x.clientId===c.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const isolees=list.filter(s=>!s.sessionId||!db.sessions.some(x=>x.id===s.sessionId));
   const blocSession=(ses)=>{const lg=sessionLignes(ses.id);
     return`<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between">
       <h3 style="margin:0">Séance du ${fdate(ses.date)} — ${lg.length} prestation${lg.length>1?'s':''}</h3>
-      <div><strong>${ses.offert?'Offerte':eur(ses.total)}</strong>${ses.paiement?` <span class="hint">${esc(ses.paiement)}</span>`:''}</div></div>
+      <div style="text-align:right"><strong>${ses.offert?'Offerte':eur(ses.total)}</strong>${ses.paiement?` <span class="hint">${esc(ses.paiement)}</span>`:''}
+      ${ses.remise>0?`<br><span class="hint">Sous-total ${eur(ses.sousTotal)} · remise ${eur(ses.remise)}${ses.remiseMotif?' ('+esc(ses.remiseMotif)+')':''}</span>`:''}</div></div>
     <table><tbody>${lg.map(ligne).join('')}</tbody></table>
     ${ses.produits?`<p style="margin-top:8px"><strong>Produits utilisés :</strong> ${esc(ses.produits)}</p>`:''}
     ${ses.ressenti?`<p style="margin-top:4px"><strong>Mon ressenti :</strong> ${esc(ses.ressenti)}</p>`:''}
@@ -940,10 +941,41 @@ function rdvCollect(){const r=state.rdv;if(!r)return;
     const so=document.querySelector(`#view [name=soin_${i}]`);if(so)L.soinId=so.value;
     const mo=document.querySelector(`#view [name=montant_${i}]`);if(mo)L.montant=mo.value;
     const nt=document.querySelector(`#view [name=lnote_${i}]`);if(nt)L.note=nt.value;});
+  const rm=document.querySelector('#view [name=rdvRemise]');if(rm)r.data.remise=rm.value;
+  const rt=document.querySelector('#view [name=rdvRemiseType]');if(rt)r.data.remiseType=rt.value;
+  const rr=document.querySelector('#view [name=rdvRemiseRaison]');if(rr)r.data.remiseRaison=rr.value;
+  ['remise','remiseType','remiseMotif'].forEach(k=>{const el=document.querySelector(`#view [name=${k}]`);if(el)r.data[k]=el.value;});
   const pa=document.querySelector('#view [name=rdvPaiement]');if(pa)r.data.paiement=pa.value;
   const of=document.querySelector('#view [name=rdvOffert]');if(of)r.data.offert=of.checked;
   const fc=document.querySelector('#view [name=ficheConseils]');if(fc)r.data.ficheConseils=fc.checked;}
 function rdvTotal(d){return (d.lignes||[]).reduce((t,L)=>t+numFR(L.montant),0);}
+function calcRemise(d){
+  const lignes=(d.lignes||[]).filter(L=>L.soinId);
+  const bruts=lignes.map(L=>numFR(prixDefaut(L)));
+  const sousTotal=bruts.reduce((a,b)=>a+b,0);
+  if(d.offert)return{sousTotal,remise:sousTotal,total:0,nets:bruts.map(()=>0),bruts};
+  let remise=numFR(d.remise);
+  if(d.remiseType==='pct')remise=sousTotal*Math.min(100,Math.max(0,remise))/100;
+  remise=Math.min(Math.max(0,remise),sousTotal);
+  const total=Math.round((sousTotal-remise)*100)/100;
+  let nets=bruts.map(b=>sousTotal?Math.round(b*(total/sousTotal)*100)/100:0);
+  const ecart=Math.round((total-nets.reduce((a,b)=>a+b,0))*100)/100;
+  if(nets.length)nets[nets.length-1]=Math.round((nets[nets.length-1]+ecart)*100)/100;
+  return{sousTotal,remise:Math.round(remise*100)/100,total,nets,bruts};}
+function remiseCalc(d){
+  const lignes=(d.lignes||[]).filter(L=>L.soinId);
+  const bases=lignes.map(L=>numFR(prixDefaut(L)));
+  const sousTotal=bases.reduce((t,x)=>t+x,0);
+  if(d.offert)return{sousTotal,remise:sousTotal,total:0,montants:bases.map(()=>0)};
+  const val=numFR(d.remise);
+  let remise=d.remiseType==='%'?sousTotal*val/100:val;
+  remise=Math.min(Math.max(remise,0),sousTotal);
+  const total=Math.round((sousTotal-remise)*100)/100;
+  if(!remise||!sousTotal)return{sousTotal,remise:0,total:sousTotal,montants:bases};
+  let montants=bases.map(b=>Math.round(b*(total/sousTotal)*100)/100);
+  const ecart=Math.round((total-montants.reduce((t,x)=>t+x,0))*100)/100;
+  if(ecart&&montants.length)montants[montants.length-1]=Math.round((montants[montants.length-1]+ecart)*100)/100;
+  return{sousTotal,remise:Math.round(remise*100)/100,total,montants};}
 function prixDefaut(L){const s=db.soins.find(x=>x.id===L.soinId);return L.montant!==''?L.montant:(s?s.prix:'');}
 function viewRdv(){
   const r=state.rdv;const c=C.get(r.clientId);if(!c){state.rdv=null;return viewClients();}
@@ -996,22 +1028,34 @@ function viewRdv(){
     <textarea name="conseils" rows="6" placeholder="Alimentation, hygiène de vie, rituel à suivre, produits recommandés, auto-massages…">${esc(d.conseils)}</textarea>
     <label class="check" style="margin-top:10px"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer la fiche imprimable à lui remettre</label></div>`;
   }else{
-    const total=d.offert?0:(d.lignes||[]).reduce((t,L)=>t+numFR(prixDefaut(L)),0);
+    const R=calcRemise(d);const lignesOK=(d.lignes||[]).filter(L=>L.soinId);
     body=`<div class="card"><h2>Clôture</h2>
     <p class="hint" style="margin-bottom:10px">Un montant par prestation pour suivre la rentabilité. La cliente règle le total en une fois.</p>
-    <table><thead><tr><th>Prestation</th><th>Réalisée</th><th style="text-align:right">Montant (€)</th></tr></thead><tbody>
-    ${(d.lignes||[]).map((L,i)=>{const so=db.soins.find(x=>x.id===L.soinId);
+    <table><thead><tr><th>Prestation</th><th>Réalisée</th><th style="text-align:right">Prix (€)</th>${R.remise>0?'<th style="text-align:right">Après remise</th>':''}</tr></thead><tbody>
+    ${lignesOK.map((L,i)=>{const so=db.soins.find(x=>x.id===L.soinId);
       return`<tr><td>${esc(so?so.designation:'—')}</td>
       <td>${L.fait?'<span class="badge ok">✓</span>':'<span class="badge warn">non cochée</span>'}</td>
-      <td style="text-align:right"><input type="text" inputmode="decimal" name="montant_${i}" value="${esc(prixDefaut(L))}" style="max-width:110px;text-align:right" ${d.offert?'disabled':''}></td></tr>`;}).join('')}
+      <td style="text-align:right"><input type="text" inputmode="decimal" name="montant_${i}" value="${esc(prixDefaut(L))}" style="max-width:110px;text-align:right" ${d.offert?'disabled':''}></td>
+      ${R.remise>0?`<td style="text-align:right;font-weight:600">${eur(R.nets[i])}</td>`:''}</tr>`;}).join('')}
     </tbody></table>
-    <div class="row" style="justify-content:flex-end;margin-top:10px"><h2 style="margin:0">Total : ${eur(total)}</h2></div>
+    <div class="row" style="margin-top:12px;align-items:flex-end;gap:8px;flex-wrap:wrap">
+      <div><label>Geste commercial</label><input type="text" inputmode="decimal" name="remise" value="${esc(d.remise||'')}" placeholder="0" style="max-width:90px" ${d.offert?'disabled':''}></div>
+      <div><label>&nbsp;</label><select name="remiseType" style="max-width:110px" ${d.offert?'disabled':''}>
+        <option value="eur" ${d.remiseType!=='pct'?'selected':''}>€</option>
+        <option value="pct" ${d.remiseType==='pct'?'selected':''}>%</option></select></div>
+      <div style="flex:1;min-width:180px"><label>Motif (facultatif)</label><input name="remiseMotif" value="${esc(d.remiseMotif||'')}" placeholder="Enchaînement de deux soins, fidélité…" ${d.offert?'disabled':''}></div>
+    </div>
+    <p class="hint" style="margin-top:6px">La remise est répartie au prorata sur les prestations, pour que chacune garde une rentabilité juste.</p>
+    <div style="margin-top:12px;text-align:right">
+      <p style="margin:2px 0">Sous-total : ${eur(R.sousTotal)}</p>
+      ${R.remise>0?`<p style="margin:2px 0;color:var(--rust)">Remise : − ${eur(R.remise)}</p>`:''}
+      <h2 style="margin:6px 0 0">Total : ${eur(R.total)}</h2></div>
     <hr class="sep">
     <div class="grid3">
       <div><label>Mode de paiement</label><select name="rdvPaiement">${MODES.map(m=>`<option ${m===d.paiement?'selected':''}>${m}</option>`).join('')}</select></div>
       <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="rdvOffert" ${d.offert?'checked':''}> Séance offerte</label></div>
       <div style="align-self:flex-end"><label class="check"><input type="checkbox" name="ficheConseils" ${d.ficheConseils?'checked':''}> Créer la fiche conseil</label></div></div>
-    <p class="hint" style="margin-top:12px">En validant : ${(d.lignes||[]).length} prestation(s) enregistrée(s) dans l’historique, votre ressenti et les produits utilisés conservés sur la séance${d.ficheConseils?', et une fiche conseil créée pour la cliente':''}. La facture reste à émettre dans Indy.</p></div>`;
+    <p class="hint" style="margin-top:12px">En validant : ${lignesOK.length} prestation(s) enregistrée(s) dans l’historique, votre ressenti et les produits utilisés conservés sur la séance${d.ficheConseils?', et une fiche conseil créée pour la cliente':''}. La facture reste à émettre dans Indy.</p></div>`;
   }
   return`<div class="row" style="justify-content:space-between;margin-bottom:6px">
     <button class="btn ghost sm" data-act="rdvQuit">✕ Quitter le mode séance</button></div>
@@ -1571,7 +1615,8 @@ document.addEventListener('click',async(e)=>{
     prepRdv(){state.view='clients';state.clientId=id;state.rdvQuestEdit=false;
       state.rdv={clientId:id,step:0,data:{etat:'',obs:'',produits:'',conseils:'',
         lignes:[{soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''}],
-        paiement:MODES[0],offert:false,ficheConseils:true}};render();},
+        remise:'',remiseType:'€',remiseRaison:'',
+        paiement:MODES[0],offert:false,ficheConseils:true,remise:'',remiseType:'eur',remiseMotif:''}};render();},
     rdvAddLigne(){rdvCollect();state.rdv.data.lignes.push({soinId:db.soins[0]?db.soins[0].id:'',fait:false,montant:'',note:''});render();},
     rdvDelLigne(){rdvCollect();const i=+el.dataset.i;if(state.rdv.data.lignes.length>1)state.rdv.data.lignes.splice(i,1);render();},
     rdvToggleFait(){rdvCollect();const i=+el.dataset.i;const L=state.rdv.data.lignes[i];L.fait=!L.fait;render();},
@@ -1584,21 +1629,21 @@ document.addEventListener('click',async(e)=>{
       if(!lignes.length)return toast('Aucune prestation à enregistrer',true);
       const nonFaites=lignes.filter(L=>!L.fait).length;
       if(nonFaites&&!confirm(nonFaites+' prestation(s) ne sont pas cochées comme réalisées. Les enregistrer quand même ?'))return;
-      const sid=uid('ses');
-      const total=d.offert?0:lignes.reduce((t,L)=>t+numFR(prixDefaut(L)),0);
+      const sid=uid('ses');const R=calcRemise(d);
       db.sessions.push({id:sid,clientId:c.id,date:today(),etat:d.etat||'',ressenti:d.obs||'',
-        produits:d.produits||'',conseils:d.conseils||'',paiement:d.offert?'':d.paiement,offert:!!d.offert,total});
+        produits:d.produits||'',conseils:d.conseils||'',paiement:d.offert?'':d.paiement,offert:!!d.offert,
+        sousTotal:R.sousTotal,remise:R.remise,remiseMotif:d.remiseMotif||'',total:R.total});
       lignes.forEach((L,i)=>{const so=db.soins.find(x=>x.id===L.soinId);
         db.seances.push({id:uid('se'),sessionId:sid,clientId:c.id,date:today(),soinId:L.soinId,
           designation:so?so.designation:'Soin',duree:so?so.duree:'',
-          montant:d.offert?0:numFR(prixDefaut(L)),paiement:d.offert?'':(i===0?d.paiement:''),
+          montant:R.nets[i],montantBrut:R.bruts[i],paiement:d.offert?'':(i===0?d.paiement:''),
           offert:!!d.offert,fait:!!L.fait,notes:L.note||''});});
       if(d.ficheConseils&&d.conseils){
         db.fiches.push({id:uid('f'),clientId:c.id,sessionId:sid,type:'conseils',date:today(),
           titre:'Conseils du '+new Date().toLocaleDateString('fr-FR'),
           sections:FICHE_TPL.conseils.map(([t])=>({titre:t,texte:t==='Autres recommandations'?d.conseils:''}))});}
       state.rdv=null;state.tab='seances';saveLocal();render();
-      toast(lignes.length+' prestation(s) enregistrée(s) · total '+eur(total));},
+      toast(lignes.length+' prestation(s) enregistrée(s) · total '+eur(R.total)+(R.remise>0?' (remise '+eur(R.remise)+')':''));},
     delFin(){db.fin=db.fin.filter(f=>f.id!==id);saveLocal();render();},
     dupFixes(){const cur=state.finMois;const[y,m]=cur.split('-').map(Number);const nd=new Date(y,m,1);const next=nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0');
       const fixes=db.fin.filter(f=>f.mois===cur&&f.type==='charge'&&f.nature!=='exceptionnelle');
